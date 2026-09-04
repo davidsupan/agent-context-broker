@@ -2,6 +2,10 @@
 
 Agent Context Broker is an open-source beta with a curated, proposal-first contribution process. Starting with a clear report or design conversation helps keep the provider-neutral contracts focused and gives maintainers a chance to confirm scope before implementation.
 
+By participating, you agree to follow the [code of conduct](CODE_OF_CONDUCT.md).
+Project decisions follow the maintainer-led process in [GOVERNANCE.md](GOVERNANCE.md),
+and usage questions belong in the channels described by [SUPPORT.md](SUPPORT.md).
+
 ## Start with a report or proposal
 
 Use the [GitHub issue tracker](https://github.com/davidsupan/agent-context-broker/issues) or a GitHub Discussion to share:
@@ -27,6 +31,9 @@ Before opening a PR, link the relevant accepted Discussion or issue and keep the
 - Add or update deterministic tests for behavioral changes.
 - Describe security, privacy, compatibility, or migration impact when it matters.
 - Keep fixtures and examples minimal, synthetic, and easy to reproduce.
+
+By submitting a contribution, you confirm that you have the right to submit it
+and agree that it is licensed under the repository's Apache License 2.0.
 
 ## Validate locally
 

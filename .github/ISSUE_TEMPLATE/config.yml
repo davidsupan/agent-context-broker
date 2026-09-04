@@ -4,5 +4,5 @@ contact_links:
     url: https://github.com/davidsupan/agent-context-broker/discussions
     about: Discuss scope with maintainers before implementing a feature.
   - name: Security report
-    url: https://github.com/davidsupan/agent-context-broker/security/policy
-    about: Report vulnerabilities privately according to the security policy.
+    url: https://github.com/davidsupan/agent-context-broker/security/advisories/new
+    about: Report a vulnerability privately to the maintainer.
