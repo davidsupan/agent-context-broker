@@ -7,7 +7,7 @@ $packageRoot = Split-Path -Parent $PSScriptRoot
 $requiredFiles = @(
     'README.md',
     'LICENSE',
-    'LICENCE.md',
+    'LICENSE.md',
     'SECURITY.md',
     'CONTRIBUTING.md',
     'package.json',

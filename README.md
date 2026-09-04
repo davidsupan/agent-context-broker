@@ -403,3 +403,9 @@ The shared package contains no active hooks. Private Codex and Claude wrappers
 own machine-specific activation. A private multi-provider installer prepares
 hash-bound plans, requires the exact manifest digest for activation, preserves
 existing handlers, creates byte-exact backups, and supports rollback.
+
+## License
+
+Agent Context Broker is available under the Apache License 2.0. See
+[LICENSE.md](LICENSE.md) for a short summary and [LICENSE](LICENSE) for the full
+license text.
