@@ -2,13 +2,12 @@ import { homedir } from 'node:os';
 import { delimiter, dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { defaultRuntimeHome } from '../../../src/platform-paths.mjs';
+
 const providerRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const toolRoot = process.env.AGENT_CONTEXT_BROKER_TOOL_ROOT ??
   resolve(providerRoot, '..', '..');
-const runtimeHome = process.env.AGENT_CONTEXT_BROKER_HOME ?? join(
-  process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'),
-  'AgentContextBroker'
-);
+const runtimeHome = defaultRuntimeHome();
 const { createLifecycleConsumer } = await import(
   pathToFileURL(join(toolRoot, 'src', 'lifecycle-consumer.mjs')).href
 );

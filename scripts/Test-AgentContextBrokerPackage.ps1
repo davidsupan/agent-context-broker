@@ -5,9 +5,13 @@ $ErrorActionPreference = 'Stop'
 $packageRoot = Split-Path -Parent $PSScriptRoot
 
 $requiredFiles = @(
+    '.github\ISSUE_TEMPLATE\bug_report.yml',
+    '.github\ISSUE_TEMPLATE\config.yml',
+    '.github\PULL_REQUEST_TEMPLATE.md',
+    '.github\workflows\ci.yml',
     'README.md',
     'LICENSE',
-    'LICENCE.md',
+    'LICENSE.md',
     'SECURITY.md',
     'CONTRIBUTING.md',
     'package.json',
@@ -32,6 +36,7 @@ $requiredFiles = @(
     'src\lifecycle-events.mjs',
     'src\lifecycle-consumer.mjs',
     'src\operations.mjs',
+    'src\platform-paths.mjs',
     'src\context-refresh.mjs',
     'src\context-router.mjs',
     'src\context-query.mjs',
@@ -46,6 +51,7 @@ $requiredFiles = @(
     'test\fallback-sweep.test.mjs',
     'test\lifecycle-consumer.test.mjs',
     'test\operations.test.mjs',
+    'test\platform-paths.test.mjs',
     'test\context-refresh.test.mjs',
     'test\context-router.test.mjs',
     'test\context-query.test.mjs',
@@ -56,6 +62,12 @@ $requiredFiles = @(
     'test\read-model.test.mjs',
     'scripts\agent-context-broker.ps1',
     'scripts\agent-context.ps1',
+    'scripts\Install-AgentContextBroker.ps1',
+    'scripts\Manage-AgentContextBrokerInstallation.ps1',
+    'scripts\Resolve-AgentContextBrokerHome.ps1',
+    'scripts\Test-AgentContextBrokerInstallation.ps1',
+    'scripts\Test-AgentContextBrokerInstaller.ps1',
+    'scripts\Uninstall-AgentContextBroker.ps1',
     'scripts\cross-thread-provider-proof.mjs',
     'schemas\source-record.schema.json',
     'schemas\context-claim.schema.json',
@@ -88,9 +100,20 @@ foreach ($relativePath in $requiredFiles) {
     }
 }
 
+$packageVersion = [string](Get-Content -LiteralPath (Join-Path $packageRoot 'package.json') -Raw | ConvertFrom-Json).version
+foreach ($providerManifest in @(
+    'providers\codex\package.json',
+    'providers\claude-code\package.json'
+)) {
+    $providerVersion = [string](Get-Content -LiteralPath (Join-Path $packageRoot $providerManifest) -Raw | ConvertFrom-Json).version
+    if ($providerVersion -ne $packageVersion) {
+        throw "Provider package version does not match $packageVersion`: $providerManifest"
+    }
+}
+
 $utf8 = [System.Text.UTF8Encoding]::new($false, $true)
 $textFiles = Get-ChildItem -LiteralPath $packageRoot -Recurse -File |
-    Where-Object { $_.Extension -in @('.md', '.json', '.jsonl', '.mjs', '.ps1') }
+    Where-Object { $_.Extension -in @('.md', '.json', '.jsonl', '.mjs', '.ps1', '.yml', '.yaml') }
 
 foreach ($file in $textFiles) {
     $bytes = [System.IO.File]::ReadAllBytes($file.FullName)
@@ -133,5 +156,7 @@ Get-ChildItem -LiteralPath (Join-Path $packageRoot 'scripts') -Filter '*.ps1' -F
 if ($LASTEXITCODE -ne 0) {
     throw 'Agent Context Broker conformance tests failed.'
 }
+
+& (Join-Path $packageRoot 'scripts\Test-AgentContextBrokerInstaller.ps1')
 
 Write-Output "Agent Context Broker package validation passed ($($textFiles.Count) text files)."

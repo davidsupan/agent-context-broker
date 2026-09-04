@@ -238,7 +238,7 @@ describe('provider-neutral lifecycle consumer', () => {
       session_id: 'natural-print-session',
       transcript_path: join(runtime, 'not-created-yet.jsonl'),
       hook_event_name: 'UserPromptSubmit',
-      cwd: 'C:\\git\\main',
+      cwd: 'C:\\work\\sample-project',
       prompt: 'Continue workstream agent-context-broker-live-proof-20260826. RAW_PROMPT_MUST_NOT_PERSIST'
     };
     const hookOptions = { testMode: true, now: '2026-08-26T08:02:00.000Z' };
@@ -346,7 +346,7 @@ describe('provider-neutral lifecycle consumer', () => {
       session_id: 'natural-review-session',
       transcript_path: join(runtime, 'not-created-yet.jsonl'),
       hook_event_name: 'UserPromptSubmit',
-      cwd: 'C:\\git\\main',
+      cwd: 'C:\\work\\sample-project',
       prompt: 'Please rereview acme/widgets!8466. RAW_REVIEW_PROMPT_MUST_NOT_PERSIST'
     }, { testMode: true, now: '2026-09-02T08:02:00.000Z' });
 
