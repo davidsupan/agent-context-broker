@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-context-broker.invalid/schemas/agent-context/context-query-result.schema.json",
+  "title": "Agent Context Query Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "mode", "provider", "generatedAt", "profile",
+    "routeReason", "strictIsolation", "claims", "peerProgress", "warnings",
+    "context", "injection", "audit"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "mode": { "const": "context-query" },
+    "provider": { "enum": ["codex", "claude-code"] },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "profile": { "type": ["string", "null"] },
+    "routeReason": { "type": "string", "minLength": 1 },
+    "strictIsolation": { "type": "boolean" },
+    "claims": { "type": "array", "items": { "type": "object" } },
+    "peerProgress": { "type": "array", "items": { "type": "object" } },
+    "warnings": { "type": "array", "items": { "type": "string" } },
+    "context": { "type": "string" },
+    "injection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["payload", "digest", "persisted", "artifact"],
+      "properties": {
+        "payload": { "type": "string" },
+        "digest": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+        "persisted": { "type": "boolean" },
+        "artifact": { "type": ["string", "null"] }
+      }
+    },
+    "audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "persisted", "auditId", "digest", "ticketLedgerPersisted",
+        "reviewLedgerPersisted", "threadLedgerPersisted"
+      ],
+      "properties": {
+        "persisted": { "type": "boolean" },
+        "auditId": { "type": ["string", "null"] },
+        "digest": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+        "ticketLedgerPersisted": { "type": "boolean" },
+        "reviewLedgerPersisted": { "type": "boolean" },
+        "threadLedgerPersisted": { "type": "boolean" }
+      }
+    }
+  }
+}

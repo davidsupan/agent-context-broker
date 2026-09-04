@@ -1,0 +1,23 @@
+{
+  "name": "agent-context-broker",
+  "version": "0.10.0-beta.4",
+  "description": "A local-first, metadata-only context broker for coding agents.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/davidsupan/agent-context-broker.git"
+  },
+  "bugs": {
+    "url": "https://github.com/davidsupan/agent-context-broker/issues"
+  },
+  "homepage": "https://github.com/davidsupan/agent-context-broker#readme",
+  "engines": {
+    "node": ">=20"
+  },
+  "type": "module",
+  "scripts": {
+    "check": "node --check src/metadata-inventory.mjs && node --check src/codex-inventory.mjs && node --check src/codex-inventory-v2.mjs && node --check src/claude-inventory.mjs && node --check src/content-safety.mjs && node --check src/reconciliation.mjs && node --check src/fallback-sweep.mjs && node --check src/lifecycle-events.mjs && node --check src/lifecycle-consumer.mjs && node --check src/operations.mjs && node --check src/context-refresh.mjs && node --check src/context-router.mjs && node --check src/context-query.mjs && node --check src/context-publish.mjs && node --check src/peer-progress.mjs && node --check src/work-ledgers.mjs && node --check src/event-store.mjs && node --check src/source-attestation.mjs && node --check src/corrections.mjs && node --check src/read-model.mjs && node --check src/cli.mjs && node --check providers/codex/src/bridge.mjs && node --check providers/codex/src/cli.mjs && node --check providers/claude-code/src/bridge.mjs && node --check providers/claude-code/src/cli.mjs",
+    "test": "node --test test/*.test.mjs providers/codex/test/*.test.mjs providers/claude-code/test/*.test.mjs",
+    "validate": "npm run check && npm test"
+  }
+}

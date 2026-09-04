@@ -1,0 +1,10 @@
+{
+  "name": "agent-context-broker-claude-code-provider",
+  "version": "0.10.0-beta.4",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node --check src/bridge.mjs && node --check src/cli.mjs",
+    "test": "node --test test/*.test.mjs"
+  }
+}

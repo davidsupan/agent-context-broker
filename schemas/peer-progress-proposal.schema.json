@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-context-broker.invalid/schemas/agent-context/peer-progress-proposal.schema.json",
+  "title": "Agent Context Broker Peer Progress Proposal",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "proposalId", "sourceToken", "scope", "work", "state",
+    "stage", "summary", "nextSteps", "limitations", "changedSurfaces",
+    "canonicalRefs", "relatedScopes", "observedAt", "ttlSeconds"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "proposalId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/!-]{0,127}$" },
+    "sourceToken": { "type": "string", "pattern": "^acb://source/[a-f0-9]{64}$" },
+    "scope": { "$ref": "#/$defs/scope" },
+    "work": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "key"],
+      "properties": {
+        "kind": { "enum": ["ticket", "merge-request", "thread", "implementation", "review", "build", "bugfix", "qa", "custom"] },
+        "key": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/!-]{0,127}$" }
+      },
+      "allOf": [{
+        "if": { "properties": { "kind": { "const": "thread" } }, "required": ["kind"] },
+        "then": { "properties": { "key": { "const": "current" } } }
+      }]
+    },
+    "state": { "enum": ["active", "blocked", "completed"] },
+    "stage": { "enum": ["research", "implementation", "validation", "review", "ci", "handoff", "other"] },
+    "summary": { "type": "string", "minLength": 1, "maxLength": 1200 },
+    "nextSteps": { "$ref": "#/$defs/textList" },
+    "limitations": { "$ref": "#/$defs/textList" },
+    "changedSurfaces": { "$ref": "#/$defs/textList" },
+    "canonicalRefs": {
+      "type": "array",
+      "maxItems": 12,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1, "maxLength": 500 }
+    },
+    "relatedScopes": {
+      "type": "array",
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/relation" }
+    },
+    "revision": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "sourceSha": { "type": "string", "pattern": "^[a-f0-9]{7,64}$" },
+        "targetSha": { "type": "string", "pattern": "^[a-f0-9]{7,64}$" },
+        "pipelineId": { "type": ["string", "integer"], "pattern": "^\\d{1,12}$" },
+        "pipelineStatus": { "enum": ["unknown", "created", "pending", "running", "passed", "failed", "canceled", "skipped", "manual"] }
+      }
+    },
+    "observedAt": { "type": "string", "format": "date-time" },
+    "ttlSeconds": { "type": "integer", "minimum": 60, "maximum": 2592000 }
+  },
+  "$defs": {
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "key"],
+      "properties": {
+        "kind": { "enum": ["global", "project", "workstream", "ticket", "merge-request"] },
+        "key": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/!-]{0,127}$" }
+      }
+    },
+    "relation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "key"],
+      "properties": {
+        "kind": { "enum": ["global", "project", "workstream", "ticket", "merge-request"] },
+        "key": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/!-]{0,127}$" }
+      }
+    },
+    "textList": {
+      "type": "array",
+      "maxItems": 10,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1, "maxLength": 320 }
+    }
+  }
+}

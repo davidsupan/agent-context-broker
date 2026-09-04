@@ -1,0 +1,17 @@
+node_modules/
+coverage/
+dist/
+*.tgz
+*.log
+
+.env
+.env.*
+!.env.example
+
+.agent-context-broker/
+runtime/
+tmp/
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

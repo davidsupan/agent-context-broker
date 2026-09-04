@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "batchId": "example-agent-handoff",
+  "expectedSnapshotHash": null,
+  "scope": { "kind": "project", "key": "example-project" },
+  "relationKeys": ["project:d4ac4d8d20181ce3f09e9fd741577dd72efca551184922c0e482eb5c22ccc64b"],
+  "claims": [
+    {
+      "claimKey": "handoff.example",
+      "claimType": "procedure",
+      "subject": "agent-context-broker",
+      "predicate": "requires-review-before-acceptance",
+      "value": "Conversation-only conclusions remain pending until reconciled",
+      "observedAt": "2026-08-25T00:00:00.000Z",
+      "confidence": 1,
+      "sensitivity": "private",
+      "evidenceClass": "agent-handoff",
+      "verification": "unverified",
+      "expectedCurrentClaimId": null,
+      "canonicalRefs": ["context://agent-context-broker/agent-handoff"],
+      "provenance": [
+        {
+          "provider": "codex",
+          "sessionKey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "recordKey": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "sourceHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        }
+      ]
+    }
+  ]
+}

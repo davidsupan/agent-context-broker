@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-context-broker.invalid/schemas/agent-context/manual-context-refresh.schema.json",
+  "title": "Manual Agent Context Refresh",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "mode", "provider", "generatedAt", "sessionKey",
+    "relationKeyCount", "afterSequence", "watermark", "acceptedSnapshots",
+    "relatedDeltas", "warnings", "context", "audit"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "mode": { "const": "manual-context-refresh" },
+    "provider": { "enum": ["codex", "claude-code"] },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "sessionKey": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "relationKeyCount": { "type": "integer", "minimum": 0 },
+    "afterSequence": { "type": "integer", "minimum": 0 },
+    "watermark": { "type": "integer", "minimum": 0 },
+    "acceptedSnapshots": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "snapshotId", "snapshotHash", "version", "scope", "createdAt",
+          "relationKeys", "canonicalRefs", "claims", "omittedClaimCount"
+        ],
+        "properties": {
+          "snapshotId": { "type": "string", "minLength": 1 },
+          "snapshotHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "version": { "type": "integer", "minimum": 1 },
+          "scope": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "key"],
+            "properties": {
+              "kind": { "enum": ["global", "project", "workstream", "ticket", "merge-request"] },
+              "key": { "type": "string", "minLength": 1 }
+            }
+          },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "relationKeys": {
+            "type": "array",
+            "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}:[a-f0-9]{64}$" }
+          },
+          "canonicalRefs": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "claims": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["claimId", "claimKey", "valueHash", "valueOmitted"],
+              "properties": {
+                "claimId": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+                "claimKey": { "type": "string", "minLength": 1 },
+                "value": {},
+                "valueHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+                "valueOmitted": { "type": "boolean" }
+              }
+            }
+          },
+          "omittedClaimCount": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "relatedDeltas": {
+      "type": "array",
+      "items": { "$ref": "context-delta.schema.json" }
+    },
+    "warnings": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "context": { "type": "string", "minLength": 1 },
+    "audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["persisted", "auditId", "digest"],
+      "properties": {
+        "persisted": { "type": "boolean" },
+        "auditId": { "type": ["string", "null"] },
+        "digest": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" }
+      }
+    }
+  }
+}

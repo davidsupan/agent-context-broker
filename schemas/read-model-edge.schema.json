@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-context-broker.invalid/schemas/agent-context/read-model-edge.schema.json",
+  "title": "Agent Context Broker Read Model Edge",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "from", "to", "kind", "sequence", "eventId"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "from": { "type": "string", "pattern": "^acb://[a-z][a-z0-9-]*/[a-f0-9]{64}$" },
+    "to": { "type": "string", "pattern": "^acb://[a-z][a-z0-9-]*/[a-f0-9]{64}$" },
+    "kind": { "enum": ["sourced-from", "evidenced-by", "replaces"] },
+    "sequence": { "type": "integer", "minimum": 1 },
+    "eventId": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

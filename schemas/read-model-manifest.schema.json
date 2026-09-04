@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-context-broker.invalid/schemas/agent-context/read-model-manifest.schema.json",
+  "title": "Agent Context Broker Read Model Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "sourceSequence", "sourceEventId", "sourceHeadHash",
+    "projectedThroughAt", "nodeCount", "edgeCount", "nodesHash",
+    "edgesHash", "indexesHash", "projectionHash"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "sourceSequence": { "type": "integer", "minimum": 0 },
+    "sourceEventId": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+    "sourceHeadHash": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+    "projectedThroughAt": { "type": ["string", "null"], "format": "date-time" },
+    "nodeCount": { "type": "integer", "minimum": 0 },
+    "edgeCount": { "type": "integer", "minimum": 0 },
+    "nodesHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "edgesHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "indexesHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "projectionHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

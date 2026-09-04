@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-context-broker.invalid/schemas/agent-context/source-record.schema.json",
+  "title": "Agent Context Source Record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "provider",
+    "sessionId",
+    "recordId",
+    "observedAt",
+    "sourceHash",
+    "privacy",
+    "recordType"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "provider": { "type": "string", "minLength": 1 },
+    "surface": { "type": "string" },
+    "sessionId": { "type": "string", "minLength": 1 },
+    "parentSessionId": { "type": ["string", "null"] },
+    "recordId": { "type": "string", "minLength": 1 },
+    "recordType": {
+      "enum": ["message", "tool-call", "tool-result", "decision", "metadata"]
+    },
+    "observedAt": { "type": "string", "format": "date-time" },
+    "workspace": { "type": ["string", "null"] },
+    "branch": { "type": ["string", "null"] },
+    "taskKeys": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    },
+    "sourceHash": { "type": "string", "pattern": "^[a-fA-F0-9]{64}$" },
+    "privacy": { "enum": ["shared", "private", "restricted"] },
+    "redacted": { "type": "boolean", "default": false },
+    "payloadRef": { "type": ["string", "null"] },
+    "lineageConfidence": { "type": "number", "minimum": 0, "maximum": 1 }
+  }
+}

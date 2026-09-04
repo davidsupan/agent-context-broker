@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-context-broker.invalid/schemas/agent-context/source-attestation.schema.json",
+  "title": "Agent Context Broker Source Attestation Input",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "provider", "sessionKey", "recordKey", "sourceHash",
+    "inventoryHash", "observedAt", "scope", "sensitivity"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "provider": { "enum": ["codex", "claude-code"] },
+    "sessionKey": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "recordKey": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "sourceHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "inventoryHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "observedAt": { "type": "string", "format": "date-time" },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "keyHash"],
+      "properties": {
+        "kind": { "enum": ["global", "project", "workstream", "ticket", "merge-request"] },
+        "keyHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+    "sensitivity": { "enum": ["shared", "private"] }
+  }
+}

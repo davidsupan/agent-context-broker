@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-context-broker.invalid/schemas/agent-context/context-delta.schema.json",
+  "title": "Agent Context Metadata Delta",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "deltaId",
+    "sequence",
+    "runId",
+    "provider",
+    "sourceId",
+    "observedAt",
+    "classification",
+    "threadState",
+    "relationKeys",
+    "appendedBytes",
+    "recordCountDelta"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "deltaId": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "sequence": { "type": "integer", "minimum": 1 },
+    "runId": { "type": "string", "minLength": 1 },
+    "provider": { "enum": ["codex", "claude-code"] },
+    "sourceId": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "observedAt": { "type": "string", "format": "date-time" },
+    "expiresAt": { "type": ["string", "null"], "format": "date-time" },
+    "classification": { "enum": ["unverified", "candidate"] },
+    "threadState": { "enum": ["active", "quiescent", "completed", "aborted", "reopened"] },
+    "previousThreadState": { "type": ["string", "null"], "enum": [null, "active", "quiescent", "completed", "aborted", "reopened"] },
+    "relationKeys": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "appendedBytes": { "type": "integer", "minimum": 0 },
+    "recordCountDelta": {
+      "type": "object",
+      "additionalProperties": { "type": "integer", "minimum": 0 }
+    },
+    "coverage": { "enum": ["full", "tail", "incremental"] }
+  }
+}

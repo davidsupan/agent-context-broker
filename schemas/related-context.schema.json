@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-context-broker.invalid/schemas/agent-context/related-context.schema.json",
+  "title": "Related Agent Context Delta View",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "provider",
+    "generatedAt",
+    "afterSequence",
+    "watermark",
+    "relationKeyCount",
+    "ledgerFilesScanned",
+    "ledgerFilesSkipped",
+    "deltas"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "provider": { "enum": ["codex", "claude-code"] },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "afterSequence": { "type": "integer", "minimum": 0 },
+    "watermark": { "type": "integer", "minimum": 0 },
+    "relationKeyCount": { "type": "integer", "minimum": 0 },
+    "ledgerFilesScanned": { "type": "integer", "minimum": 0 },
+    "ledgerFilesSkipped": { "type": "integer", "minimum": 0 },
+    "deltas": {
+      "type": "array",
+      "items": { "$ref": "context-delta.schema.json" }
+    }
+  }
+}

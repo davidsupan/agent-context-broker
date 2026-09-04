@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-context-broker.invalid/schemas/agent-context/source-inventory.schema.json",
+  "title": "Agent Context Source Inventory",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "runId",
+    "provider",
+    "adapterVersion",
+    "generatedAt",
+    "mode",
+    "outputClass",
+    "sources",
+    "skipped"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "runId": { "type": "string", "minLength": 1 },
+    "provider": { "enum": ["codex", "claude-code"] },
+    "adapterVersion": { "type": "string", "minLength": 1 },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "mode": { "const": "observe" },
+    "outputClass": { "const": "private-metadata" },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sourceId",
+          "sessionIdHash",
+          "generation",
+          "sizeBytes",
+          "lastWriteAt",
+          "coverage",
+          "coverageStartOffset",
+          "nextOffset",
+          "recordCounts",
+          "malformedRecords",
+          "threadState",
+          "relationKeys",
+          "contentChainHash",
+          "privacy"
+        ],
+        "properties": {
+          "sourceId": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "sessionIdHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "parentSessionIdHash": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+          "generation": { "type": "integer", "minimum": 1 },
+          "sizeBytes": { "type": "integer", "minimum": 0 },
+          "lastWriteAt": { "type": "string", "format": "date-time" },
+          "coverage": { "enum": ["full", "tail", "incremental"] },
+          "coverageStartOffset": { "type": "integer", "minimum": 0 },
+          "nextOffset": { "type": "integer", "minimum": 0 },
+          "recordCounts": {
+            "type": "object",
+            "additionalProperties": { "type": "integer", "minimum": 0 }
+          },
+          "malformedRecords": { "type": "integer", "minimum": 0 },
+          "firstEventAt": { "type": ["string", "null"], "format": "date-time" },
+          "lastEventAt": { "type": ["string", "null"], "format": "date-time" },
+          "threadState": { "enum": ["active", "quiescent", "completed", "aborted", "reopened"] },
+          "relationKeys": {
+            "type": "array",
+            "items": { "type": "string", "pattern": "^(workspace|repository|branch|ticket|mr|workstream|parent):[a-f0-9]{64}$" },
+            "uniqueItems": true
+          },
+          "contentChainHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "privacy": { "const": "private" }
+        }
+      }
+    },
+    "skipped": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sourceId", "reason"],
+        "properties": {
+          "sourceId": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "reason": { "enum": ["unchanged", "file-limit", "not-jsonl", "unreadable"] }
+        }
+      }
+    }
+  }
+}

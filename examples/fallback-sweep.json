@@ -1,0 +1,14 @@
+{
+  "sources": [
+    {
+      "provider": "codex",
+      "source": "<codex-history-root>",
+      "recursive": true
+    },
+    {
+      "provider": "claude-code",
+      "source": "<claude-code-project-history-root>",
+      "recursive": true
+    }
+  ]
+}

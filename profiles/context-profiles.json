@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 1,
+  "profiles": [
+    {
+      "id": "review",
+      "description": "Code and merge-request review context",
+      "taskKinds": ["review", "rereview", "merge-request-review"],
+      "keywords": ["review", "merge request", "gitlab", "finding", "discussion", "pipeline", "known finding"],
+      "claimTypes": ["fact", "decision", "procedure", "risk", "result"],
+      "crossProvider": true,
+      "maxSnapshots": 5,
+      "maxClaims": 16,
+      "maxValueBytes": 4096,
+      "maxContextBytes": 16384
+    },
+    {
+      "id": "build",
+      "description": "Build, CI, deployment, and static-analysis context",
+      "taskKinds": ["build", "ci", "deployment", "static-analysis"],
+      "keywords": ["build", "ci", "pipeline", "artifact", "deploy", "sonar", "visual", "iis", "docker"],
+      "claimTypes": ["fact", "decision", "procedure", "risk", "result"],
+      "crossProvider": true,
+      "maxSnapshots": 5,
+      "maxClaims": 16,
+      "maxValueBytes": 4096,
+      "maxContextBytes": 16384
+    },
+    {
+      "id": "implementation",
+      "description": "Feature implementation and refactoring context",
+      "taskKinds": ["implementation", "feature", "refactor"],
+      "keywords": ["implementation", "feature", "architecture", "contract", "component", "api", "database", "test"],
+      "claimTypes": ["fact", "decision", "procedure", "risk", "result"],
+      "crossProvider": true,
+      "maxSnapshots": 5,
+      "maxClaims": 20,
+      "maxValueBytes": 4096,
+      "maxContextBytes": 20480
+    },
+    {
+      "id": "bugfix",
+      "description": "Bug reproduction, diagnosis, and remediation context",
+      "taskKinds": ["bugfix", "debug", "incident", "regression"],
+      "keywords": ["bug", "failure", "regression", "root cause", "reproduce", "diagnostic", "fix", "error"],
+      "claimTypes": ["fact", "decision", "procedure", "risk", "result"],
+      "crossProvider": true,
+      "maxSnapshots": 6,
+      "maxClaims": 20,
+      "maxValueBytes": 4096,
+      "maxContextBytes": 20480
+    },
+    {
+      "id": "ticket-qa",
+      "description": "Jira ticket preparation, acceptance, and QA context",
+      "taskKinds": ["ticket-preparation", "qa", "acceptance", "e2e"],
+      "keywords": ["jira", "ticket", "acceptance", "qa", "e2e", "package", "handover", "ledger"],
+      "claimTypes": ["fact", "decision", "procedure", "risk", "result"],
+      "crossProvider": true,
+      "maxSnapshots": 6,
+      "maxClaims": 20,
+      "maxValueBytes": 4096,
+      "maxContextBytes": 20480
+    },
+    {
+      "id": "custom-project",
+      "description": "Ad-hoc work that benefits from general project context",
+      "taskKinds": ["custom", "ad-hoc", "project"],
+      "keywords": ["project", "repository", "workbench", "ticket", "review", "agent"],
+      "claimTypes": ["fact", "decision", "procedure", "risk", "result"],
+      "crossProvider": true,
+      "maxSnapshots": 4,
+      "maxClaims": 12,
+      "maxValueBytes": 3072,
+      "maxContextBytes": 12288
+    },
+    {
+      "id": "strict-isolation",
+      "description": "No broker history or peer-provider context",
+      "taskKinds": ["strict-isolation"],
+      "keywords": [],
+      "claimTypes": [],
+      "crossProvider": false,
+      "maxSnapshots": 0,
+      "maxClaims": 0,
+      "maxValueBytes": 0,
+      "maxContextBytes": 1024
+    }
+  ]
+}

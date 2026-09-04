@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "proposalId": "standalone-thread-handoff",
+  "sourceToken": "acb://source/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "scope": {
+    "kind": "project",
+    "key": "example-project"
+  },
+  "work": {
+    "kind": "thread",
+    "key": "current"
+  },
+  "state": "completed",
+  "stage": "handoff",
+  "summary": "Reusable project workflow findings are ready for related future work.",
+  "nextSteps": [
+    "verify drift-prone references before reuse"
+  ],
+  "limitations": [],
+  "changedSurfaces": [
+    "shared agent workflow"
+  ],
+  "canonicalRefs": [],
+  "relatedScopes": [],
+  "revision": null,
+  "observedAt": "2026-09-03T08:00:00.000Z",
+  "ttlSeconds": 604800
+}

@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "proposalId": "mr-8466-review-progress",
+  "sourceToken": "acb://source/0000000000000000000000000000000000000000000000000000000000000000",
+  "scope": {
+    "kind": "merge-request",
+    "key": "acme/widgets!8466"
+  },
+  "work": {
+    "kind": "review",
+    "key": "acme/widgets!8466"
+  },
+  "state": "active",
+  "stage": "review",
+  "summary": "Review found a contract risk relevant to the linked implementation tickets",
+  "nextSteps": [
+    "refresh the exact merge request head before writeback"
+  ],
+  "limitations": [
+    "the finding has not been posted"
+  ],
+  "changedSurfaces": [
+    "review evidence only"
+  ],
+  "canonicalRefs": [
+    "https://gitlab.example.com/acme/widgets/-/merge_requests/8466"
+  ],
+  "relatedScopes": [],
+  "revision": {
+    "sourceSha": "3e949fce6f05175ebf3e92a13e12488480d86394",
+    "targetSha": "8e78170a4da5146ba98f089c6c92ebdd4c7faea3",
+    "pipelineId": 133695,
+    "pipelineStatus": "failed"
+  },
+  "observedAt": "2026-09-02T08:05:00.000Z",
+  "ttlSeconds": 86400
+}

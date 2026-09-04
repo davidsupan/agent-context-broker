@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "batchId": "replace-with-unique-batch-id",
+  "expectedSnapshotHash": null,
+  "scope": {
+    "kind": "ticket",
+    "key": "APP-EXAMPLE"
+  },
+  "relationKeys": [
+    "ticket:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  ],
+  "claims": [
+    {
+      "claimKey": "ticket.status",
+      "claimType": "fact",
+      "subject": "ticket",
+      "predicate": "status",
+      "value": "prepared",
+      "observedAt": "2026-08-24T00:00:00.000Z",
+      "confidence": 1,
+      "sensitivity": "private",
+      "evidenceClass": "canonical-artifact",
+      "verification": "verified",
+      "expectedCurrentClaimId": null,
+      "canonicalRefs": [
+        "repo://tickets/APP-EXAMPLE/HANDOVER.md"
+      ],
+      "provenance": [
+        {
+          "provider": "codex",
+          "sessionKey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "recordKey": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "sourceHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        }
+      ]
+    }
+  ]
+}

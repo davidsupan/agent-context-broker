@@ -1,0 +1,4 @@
+{"timestamp":"2026-08-24T08:00:00.000Z","type":"session_meta","payload":{"id":"fixture-completed-session","cwd":"C:\\work\\completed","source":"cli","git":{"commit_hash":"fedcba9876543210","branch":"feature/completed","repository_url":"ssh://git.example.invalid/private/repo.git"}}}
+{"timestamp":"2026-08-24T08:00:01.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-1"}}
+{"timestamp":"2026-08-24T08:00:02.000Z","type":"response_item","payload":{"type":"custom_tool_call","name":"example","arguments":"DO_NOT_PERSIST_ARGUMENTS"}}
+{"timestamp":"2026-08-24T08:00:03.000Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-1"}}

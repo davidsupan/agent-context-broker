@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "proposalId": "app-20002-db-progress",
+  "sourceToken": "acb://source/0000000000000000000000000000000000000000000000000000000000000000",
+  "scope": {
+    "kind": "ticket",
+    "key": "APP-20002"
+  },
+  "work": {
+    "kind": "ticket",
+    "key": "APP-20002"
+  },
+  "state": "active",
+  "stage": "implementation",
+  "summary": "DB work confirmed the DTO-matched aliases required by the linked BE ticket",
+  "nextSteps": [
+    "apply the script through the real deployment path",
+    "publish validation outcome for the linked BE ticket"
+  ],
+  "limitations": [
+    "full local E2E has not run yet"
+  ],
+  "changedSurfaces": [
+    "ass.LocationByIdQuery"
+  ],
+  "canonicalRefs": [
+    "jira://browse/APP-20002"
+  ],
+  "relatedScopes": [
+    {
+      "kind": "ticket",
+      "key": "APP-20001"
+    }
+  ],
+  "revision": null,
+  "observedAt": "2026-08-26T08:05:00.000Z",
+  "ttlSeconds": 3600
+}

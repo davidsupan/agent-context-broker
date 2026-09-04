@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-context-broker.invalid/schemas/agent-context/freshness.schema.json",
+  "title": "Agent Context Claim Freshness Policy",
+  "type": ["object", "null"],
+  "additionalProperties": false,
+  "required": ["policy", "verifiedAt", "expiresAt", "sourceHeadHash"],
+  "properties": {
+    "policy": { "enum": ["immutable", "ttl", "canonical-head", "manual"] },
+    "verifiedAt": { "type": "string", "format": "date-time" },
+    "expiresAt": { "type": ["string", "null"], "format": "date-time" },
+    "sourceHeadHash": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" }
+  }
+}

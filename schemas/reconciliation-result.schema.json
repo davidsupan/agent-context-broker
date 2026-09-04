@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-context-broker.invalid/schemas/agent-context/reconciliation-result.schema.json",
+  "title": "Agent Context Reconciliation Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "reconciliationId", "batchKey", "checkedAt", "state",
+    "snapshotId", "snapshotHash", "snapshotVersion", "acceptedClaimCount",
+    "duplicateClaimCount", "issues", "automaticRetryAllowed", "writesEnabled"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "reconciliationId": { "type": "string", "minLength": 1 },
+    "batchKey": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "checkedAt": { "type": "string", "format": "date-time" },
+    "state": { "enum": ["clean", "pending", "conflicted", "blocked"] },
+    "snapshotId": { "type": ["string", "null"] },
+    "snapshotHash": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+    "snapshotVersion": { "type": "integer", "minimum": 0 },
+    "acceptedClaimCount": { "type": "integer", "minimum": 0 },
+    "duplicateClaimCount": { "type": "integer", "minimum": 0 },
+    "issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "disposition", "claimKeyHash"],
+        "properties": {
+          "code": { "type": "string", "minLength": 1 },
+          "disposition": { "enum": ["pending", "conflicted", "blocked"] },
+          "claimKeyHash": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" }
+        }
+      }
+    },
+    "automaticRetryAllowed": { "const": false },
+    "writesEnabled": { "type": "boolean" }
+  }
+}

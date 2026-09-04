@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-context-broker.invalid/schemas/agent-context/codex-checkpoint.schema.json",
+  "title": "Codex Inventory Checkpoint",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "provider", "adapterVersion", "updatedAt", "sequence", "sources"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "provider": { "const": "codex" },
+    "adapterVersion": { "type": "string", "minLength": 1 },
+    "updatedAt": { "type": "string", "format": "date-time" },
+    "sequence": { "type": "integer", "minimum": 0 },
+    "sources": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sizeBytes",
+          "generation",
+          "metadataHash",
+          "lastWriteAt",
+          "nextOffset",
+          "coverageStartOffset",
+          "contentChainHash",
+          "sessionIdHash",
+          "threadState",
+          "relationKeys"
+        ],
+        "properties": {
+          "sizeBytes": { "type": "integer", "minimum": 0 },
+          "generation": { "type": "integer", "minimum": 1 },
+          "metadataHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "lastWriteAt": { "type": "string", "format": "date-time" },
+          "nextOffset": { "type": "integer", "minimum": 0 },
+          "coverageStartOffset": { "type": "integer", "minimum": 0 },
+          "contentChainHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "sessionIdHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "parentSessionIdHash": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+          "threadState": { "enum": ["active", "quiescent", "completed", "aborted", "reopened"] },
+          "lastLifecycle": { "type": ["string", "null"], "enum": [null, "task_started", "task_complete", "turn_aborted"] },
+          "relationKeys": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 },
+            "uniqueItems": true
+          }
+        }
+      }
+    }
+  }
+}

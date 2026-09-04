@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "proposalId": "APP-EXAMPLE-handover-refresh",
+  "sourceToken": "acb://source/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "scope": {
+    "kind": "ticket",
+    "key": "APP-EXAMPLE"
+  },
+  "claims": [
+    {
+      "claimKey": "ticket.handover-status",
+      "claimType": "result",
+      "subject": "APP-EXAMPLE",
+      "predicate": "handover-status",
+      "value": "validated",
+      "observedAt": "2026-08-25T00:00:00.000Z",
+      "confidence": 1,
+      "sensitivity": "shared",
+      "evidenceClass": "canonical-artifact",
+      "verification": "verified",
+      "freshness": {
+        "policy": "canonical-head",
+        "verifiedAt": "2026-08-25T00:00:00.000Z",
+        "expiresAt": null,
+        "sourceHeadHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "canonicalRefs": [
+        "repo://tickets/APP-EXAMPLE/HANDOVER.md"
+      ]
+    }
+  ]
+}

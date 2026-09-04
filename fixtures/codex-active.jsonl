@@ -1,0 +1,4 @@
+{"timestamp":"2026-08-24T09:00:00.000Z","type":"session_meta","payload":{"id":"fixture-active-session","forked_from_id":"fixture-parent","cwd":"C:\\work\\sensitive project","source":"cli","git":{"commit_hash":"0123456789abcdef","branch":"feature/private-work","repository_url":"ssh://git.example.invalid/private/repo.git"}}}
+{"timestamp":"2026-08-24T09:00:01.000Z","type":"turn_context","payload":{"turn_id":"turn-1","cwd":"C:\\work\\sensitive project"}}
+{"timestamp":"2026-08-24T09:00:02.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-1"}}
+{"timestamp":"2026-08-24T09:00:03.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"SENSITIVE_FIXTURE_VALUE_MUST_NOT_LEAK"}]}}
