@@ -43,9 +43,16 @@ test('uses the Linux state fallback when XDG_STATE_HOME is absent', () => {
   );
 });
 
+test('uses Application Support on macOS', () => {
+  assert.equal(
+    defaultRuntimeHome({ env: {}, home: '/Users/example', platform: 'darwin' }),
+    '/Users/example/Library/Application Support/AgentContextBroker'
+  );
+});
+
 test('requires an explicit home on unsupported platforms', () => {
   assert.throws(
-    () => defaultRuntimeHome({ env: {}, home: '/Users/example', platform: 'darwin' }),
+    () => defaultRuntimeHome({ env: {}, home: '/Users/example', platform: 'freebsd' }),
     /Unsupported platform/u
   );
 });

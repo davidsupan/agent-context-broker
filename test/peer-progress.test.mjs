@@ -20,9 +20,9 @@ const roots = [];
 
 function sharedWrapper() {
   const candidates = [
-    join(import.meta.dirname, '..', 'scripts', 'agent-context.ps1'),
-    join(import.meta.dirname, '..', '..', '..', 'scripts', 'agent-context.ps1'),
-    join(import.meta.dirname, '..', '..', 'scripts', 'agent-context.ps1')
+    join(import.meta.dirname, '..', 'scripts', 'agent-context.mjs'),
+    join(import.meta.dirname, '..', '..', '..', 'scripts', 'agent-context.mjs'),
+    join(import.meta.dirname, '..', '..', 'scripts', 'agent-context.mjs')
   ];
   return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0];
 }
@@ -205,9 +205,7 @@ describe('peer progress', () => {
       .filter((event) => event.eventType === 'peer-progress.published').length, 0);
   });
 
-  test('shared PowerShell wrapper exposes progress publication without requiring a skill command', {
-    skip: process.platform !== 'win32'
-  }, async () => {
+  test('shared Bun wrapper exposes progress publication without requiring a skill command', async () => {
     const runtimeRoot = root('wrapper-runtime');
     const eventRuntimeRoot = root('wrapper-events');
     const token = await source(eventRuntimeRoot, 'codex', 'wrapper');
@@ -216,11 +214,11 @@ describe('peer progress', () => {
       proposal(token, 'APP-18208', 'Natural ticket work can publish this checkpoint'), null, 2
     )}\n`, 'utf8');
     const wrapper = sharedWrapper();
-    const result = spawnSync('pwsh', [
-      '-NoProfile', '-File', wrapper,
-      '-Command', 'progress',
-      '-Provider', 'codex',
-      '-Proposal', proposalPath
+    const result = spawnSync(process.execPath, [
+      wrapper,
+      'progress',
+      '--provider', 'codex',
+      '--proposal', proposalPath
     ], {
       encoding: 'utf8',
       env: {
@@ -235,9 +233,7 @@ describe('peer progress', () => {
     assert.equal(output.writesEnabled, false);
   });
 
-  test('shared wrapper executes progress and appends metadata-only ticket audit', {
-    skip: process.platform !== 'win32'
-  }, async () => {
+  test('shared wrapper executes progress and appends metadata-only ticket audit', async () => {
     const runtimeRoot = root('wrapper-execute-runtime');
     const eventRuntimeRoot = root('wrapper-execute-events');
     const packagesRoot = root('wrapper-execute-packages');
@@ -249,14 +245,14 @@ describe('peer progress', () => {
       proposal(token, 'APP-10003', 'Claude publishes a metadata-audited ticket checkpoint'), null, 2
     )}\n`, 'utf8');
     const wrapper = sharedWrapper();
-    const result = spawnSync('pwsh', [
-      '-NoProfile', '-File', wrapper,
-      '-Command', 'progress',
-      '-Provider', 'claude-code',
-      '-Proposal', proposalPath,
-      '-TicketPackagesRoot', packagesRoot,
-      '-RuntimeHome', runtimeHome,
-      '-Execute'
+    const result = spawnSync(process.execPath, [
+      wrapper,
+      'progress',
+      '--provider', 'claude-code',
+      '--proposal', proposalPath,
+      '--ticket-packages-root', packagesRoot,
+      '--runtime-home', runtimeHome,
+      '--execute'
     ], {
       encoding: 'utf8',
       env: {
@@ -280,9 +276,7 @@ describe('peer progress', () => {
     assert.equal(JSON.stringify(rows).includes('Claude publishes'), false);
   });
 
-  test('shared wrapper executes review progress and appends metadata-only review audit', {
-    skip: process.platform !== 'win32'
-  }, async () => {
+  test('shared wrapper executes review progress and appends metadata-only review audit', async () => {
     const runtimeRoot = root('wrapper-review-runtime');
     const eventRuntimeRoot = root('wrapper-review-events');
     const reviewLedgersRoot = root('wrapper-review-ledgers');
@@ -299,14 +293,14 @@ describe('peer progress', () => {
       }), null, 2
     )}\n`, 'utf8');
     const wrapper = sharedWrapper();
-    const result = spawnSync('pwsh', [
-      '-NoProfile', '-File', wrapper,
-      '-Command', 'progress',
-      '-Provider', 'codex',
-      '-Proposal', proposalPath,
-      '-ReviewLedgersRoot', reviewLedgersRoot,
-      '-RuntimeHome', runtimeHome,
-      '-Execute'
+    const result = spawnSync(process.execPath, [
+      wrapper,
+      'progress',
+      '--provider', 'codex',
+      '--proposal', proposalPath,
+      '--review-ledgers-root', reviewLedgersRoot,
+      '--runtime-home', runtimeHome,
+      '--execute'
     ], {
       encoding: 'utf8',
       env: {
