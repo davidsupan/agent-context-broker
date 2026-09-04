@@ -12,7 +12,7 @@ body:
     id: version
     attributes:
       label: Version or commit
-      placeholder: 0.10.0-beta.5 or a commit SHA
+      placeholder: 0.10.0-beta.6 or a commit SHA
     validations:
       required: true
   - type: dropdown
@@ -32,7 +32,16 @@ body:
       options:
         - Windows
         - Linux
+        - macOS Apple Silicon
+        - macOS Intel
         - Other or unsupported
+    validations:
+      required: true
+  - type: input
+    id: bun-version
+    attributes:
+      label: Bun version
+      placeholder: 1.4.1
     validations:
       required: true
   - type: textarea

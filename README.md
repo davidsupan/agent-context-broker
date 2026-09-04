@@ -4,7 +4,7 @@ Agent Context Broker is a local-first, provider-neutral open-source beta for sha
 
 The repository contains a provider-neutral core, schemas, and optional provider bridges. Its current adapters are for Codex and Claude Code.
 
-> **Beta:** `0.10.0-beta.5` is the current release. The API and storage contracts can change while the project is being evaluated.
+> **Beta:** `0.10.0-beta.6` is the current release. The API and storage contracts can change while the project is being evaluated.
 
 ## Why it exists
 
@@ -40,38 +40,39 @@ Other providers are not advertised as supported by this beta. A new provider nee
 
 ### Runtime and platform notes
 
-- The core CLI requires Node.js 20 or newer.
-- PowerShell 7 is required for the launchers, installer, uninstaller, and integration tests.
-- This release supports Windows and Linux. macOS lifecycle and installation support is not part of the current compatibility promise.
+- Bun `1.4.x` is the only runtime dependency.
+- Windows, Linux, and macOS 13 or newer are supported.
+- macOS supports Apple Silicon and Intel hardware supported by Bun 1.4.
+- PowerShell and Node.js are not required.
 
-No npm dependencies are required for the package itself.
+No package installation is required for the broker itself.
 
 ## Quick start
 
-Clone the repository and run the two local validation commands:
+Clone the repository and validate the checkout:
 
-```powershell
+```sh
 git clone https://github.com/davidsupan/agent-context-broker.git
-Set-Location agent-context-broker
-npm run validate
-pwsh -NoProfile -File ./scripts/Test-AgentContextBrokerPackage.ps1
+cd agent-context-broker
+bun run validate
+bun pm pack --dry-run
 ```
 
-These commands check the Node.js sources, schemas, fixtures, and package files. They do not read provider history. Start with [`docs/getting-started.md`](docs/getting-started.md), then review [`docs/security-model.md`](docs/security-model.md) before enabling provider hooks.
+These commands check the Bun sources, schemas, fixtures, and package files. They do not read provider history. Start with [`docs/getting-started.md`](docs/getting-started.md), then review [`docs/security-model.md`](docs/security-model.md) before enabling provider hooks.
 
 ## Install
 
 Installation is plan-only by default. Review the generated target list, then activate that exact source manifest and target-state plan:
 
-```powershell
-$plan = ./scripts/Install-AgentContextBroker.ps1 -Provider Both |
-  ConvertFrom-Json
+```sh
+bun scripts/manage-agent-context-broker-installation.mjs install \
+  --provider both > install-plan.json
 
-./scripts/Install-AgentContextBroker.ps1 `
-  -Provider Both `
-  -ExpectedManifestDigest $plan.manifestDigest `
-  -ExpectedPlanDigest $plan.planDigest `
-  -Execute
+bun scripts/manage-agent-context-broker-installation.mjs install \
+  --provider both \
+  --expected-manifest-digest <manifestDigest-from-plan> \
+  --expected-plan-digest <planDigest-from-plan> \
+  --execute
 ```
 
 The installer preserves existing Codex and Claude Code lifecycle handlers, writes byte-exact backups, and copies a verifier and uninstaller into the managed installation. Removal and rollback are also plan-bound; see the [getting started guide](docs/getting-started.md) for the complete flow.
@@ -82,26 +83,25 @@ The installer preserves existing Codex and Claude Code lifecycle handlers, write
 
 Use the high-level launcher to route a bounded query to a provider and project scope:
 
-```powershell
-./scripts/agent-context.ps1 `
-  -Command query `
-  -Provider codex `
-  -Profile custom-project `
-  -ProjectScope `
-  -Query 'context broker','release'
+```sh
+bun scripts/agent-context.mjs query \
+  --provider codex \
+  --profile custom-project \
+  --project-scope \
+  --query "context broker" \
+  --query release
 ```
 
-Use `claude-code` for the Claude Code adapter. Commands plan changes by default. Add `-Execute` only after reviewing the planned operation; an executed query writes the metadata-only audit described in the security model.
+Use `claude-code` for the Claude Code adapter. Commands plan changes by default. Add `--execute` only after reviewing the planned operation; an executed query writes the metadata-only audit described in the security model.
 
 ### Inventory provider metadata
 
 The lower-level command inventories a bounded provider source. Keep source files private and use the matching provider name:
 
-```powershell
-./scripts/agent-context-broker.ps1 `
-  -Command inventory `
-  -Provider codex `
-  -Source <provider-source.jsonl>
+```sh
+bun src/cli.mjs inventory \
+  --provider codex \
+  --source <provider-source.jsonl>
 ```
 
 Inventory output is normalized into source records and deltas. It does not modify the native history.
@@ -116,11 +116,10 @@ See [`examples/candidate-claim-batch.json`](examples/candidate-claim-batch.json)
 
 Use peer progress for bounded updates that another related task may need while work is in flight:
 
-```powershell
-./scripts/agent-context.ps1 `
-  -Command progress `
-  -Provider codex `
-  -Proposal .\examples\peer-progress-proposal.json
+```sh
+bun scripts/agent-context.mjs progress \
+  --provider codex \
+  --proposal ./examples/peer-progress-proposal.json
 ```
 
 Progress is immutable, time-limited, and explicitly labeled unverified. The example is a shape to adapt to the current task, not a substitute for checking the proposal and its scope.
@@ -134,12 +133,12 @@ Bridge packages live under [`providers/`](providers/). Validate the checkout and
 - [`src/`](src/): provider-neutral inventory, routing, reconciliation, publication, event, and read-model code.
 - [`providers/`](providers/): Codex and Claude Code bridge packages.
 - [`schemas/`](schemas/): JSON Schema contracts for sources, claims, snapshots, events, and progress.
-- [`scripts/`](scripts/): PowerShell launchers, guarded installation and removal, and package validation.
+- [`scripts/`](scripts/): Bun launchers, guarded installation and removal, POSIX helpers, and package validation.
 - [`docs/`](docs/): getting started and security guidance.
 
 ## Beta status
 
-This is an early public beta. The current release is `0.10.0-beta.5`; APIs, storage formats, provider bridges, and platform coverage are still subject to change. The repository is suitable for evaluation and focused integration work, but integrations should review the contracts and security behavior before relying on them.
+This is an early public beta. The current release is `0.10.0-beta.6`; APIs, storage formats, provider bridges, and platform coverage are still subject to change. The repository is suitable for evaluation and focused integration work, but integrations should review the contracts and security behavior before relying on them.
 
 Security fixes are supported on the latest published revision only. See [`SECURITY.md`](SECURITY.md) for responsible disclosure guidance.
 
