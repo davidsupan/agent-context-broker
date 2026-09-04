@@ -261,7 +261,10 @@ describe('profiled context query', () => {
       execute: true,
       now: '2026-08-25T09:04:00.000Z'
     });
-    const globalText = readFileSync(join(auditRoot, readdirSync(auditRoot)[0]), 'utf8');
+    const globalAuditFile = readdirSync(auditRoot, { withFileTypes: true })
+      .find((entry) => entry.isFile() && entry.name.endsWith('.json'));
+    assert.ok(globalAuditFile, 'Expected a metadata-only global audit file.');
+    const globalText = readFileSync(join(auditRoot, globalAuditFile.name), 'utf8');
     const ticketText = readFileSync(join(ticketAuditRoot, 'APP-99999', 'CONTEXT_LEDGER.jsonl'), 'utf8');
 
     assert.equal(result.audit.persisted, true);
