@@ -21,7 +21,7 @@ Temporary Items
 .apdisk
 *.icloud
 
-### Node ###
+### JavaScript package artifacts ###
 logs
 *.log
 npm-debug.log*

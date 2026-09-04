@@ -4,7 +4,6 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
 
 permissions:
   contents: read
@@ -20,14 +19,13 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: oven-sh/setup-bun@v2
         with:
-          node-version: 22
-      - run: npm run validate
-      - run: npm pack --dry-run
-      - name: Validate PowerShell package
-        shell: pwsh
-        run: ./scripts/Test-AgentContextBrokerPackage.ps1
+          bun-version: 1.4.1
+      - run: bun run validate
+      - run: bun pm pack --dry-run
+      - run: sh -n scripts/*.sh
+      - run: ./scripts/test-shell-installation.sh
 
   test-windows:
     name: test-windows
@@ -35,10 +33,24 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: oven-sh/setup-bun@v2
         with:
-          node-version: 22
-      - run: npm run validate
-      - name: Validate PowerShell package
-        shell: pwsh
-        run: ./scripts/Test-AgentContextBrokerPackage.ps1
+          bun-version: 1.4.1
+      - shell: bash
+        run: bun run validate
+      - shell: bash
+        run: bun pm pack --dry-run
+
+  test-macos:
+    name: test-macos
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.1
+      - run: bun run validate
+      - run: bun pm pack --dry-run
+      - run: sh -n scripts/*.sh
+      - run: ./scripts/test-shell-installation.sh

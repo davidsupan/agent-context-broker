@@ -10,7 +10,7 @@ Use the [GitHub issue tracker](https://github.com/davidsupan/agent-context-broke
 - design discussions about provider-neutral contracts or workflows; and
 - focused reproductions with the smallest useful fixture or test case.
 
-When possible, include the package version or commit, provider, operating system, relevant Node.js or PowerShell version, minimal reproduction steps, and the behavior you expected. Redact sensitive values and prefer synthetic fixtures.
+When possible, include the package version or commit, provider, operating system, Bun version, minimal reproduction steps, and the behavior you expected. Redact sensitive values and prefer synthetic fixtures.
 
 ## Pull request policy
 
@@ -32,9 +32,9 @@ Before opening a PR, link the relevant accepted Discussion or issue and keep the
 
 Run both package validation commands before opening a PR:
 
-```powershell
-npm run validate
-pwsh -NoProfile -File ./scripts/Test-AgentContextBrokerPackage.ps1
+```sh
+bun run validate
+bun pm pack --dry-run
 ```
 
 ## Keep data safe

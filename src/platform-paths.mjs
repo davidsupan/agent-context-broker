@@ -26,5 +26,9 @@ export function defaultRuntimeHome({
     );
   }
 
+  if (platform === 'darwin') {
+    return pathApi.join(home, 'Library', 'Application Support', 'AgentContextBroker');
+  }
+
   throw new Error(`Unsupported platform without AGENT_CONTEXT_BROKER_HOME: ${platform}`);
 }
