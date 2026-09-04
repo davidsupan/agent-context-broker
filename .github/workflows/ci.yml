@@ -25,6 +25,9 @@ jobs:
           node-version: 22
       - run: npm run validate
       - run: npm pack --dry-run
+      - name: Validate PowerShell package
+        shell: pwsh
+        run: ./scripts/Test-AgentContextBrokerPackage.ps1
 
   test-windows:
     name: test-windows

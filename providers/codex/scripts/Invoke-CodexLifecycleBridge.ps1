@@ -1,12 +1,16 @@
 [CmdletBinding()]
-param()
+param([string]$RuntimeHome)
 
 $ErrorActionPreference = 'Stop'
+$toolRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))
+. (Join-Path $toolRoot 'scripts\Resolve-AgentContextBrokerHome.ps1')
+$resolvedRuntimeHome = Resolve-AgentContextBrokerHome -Path $RuntimeHome
+$env:AGENT_CONTEXT_BROKER_HOME = $resolvedRuntimeHome
 $activationLock = if ($env:AGENT_CONTEXT_BROKER_ACTIVATION_LOCK) {
     $env:AGENT_CONTEXT_BROKER_ACTIVATION_LOCK
 }
 else {
-    Join-Path $env:LOCALAPPDATA 'AgentContextBroker\runtime\activation\activation.lock'
+    Join-Path $resolvedRuntimeHome 'runtime/activation/activation.lock'
 }
 if (Test-Path -LiteralPath $activationLock -PathType Leaf) {
     Write-Output '{"continue":true}'

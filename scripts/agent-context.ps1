@@ -32,6 +32,15 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+$runtimeHomeResolver = @(
+    (Join-Path $PSScriptRoot 'Resolve-AgentContextBrokerHome.ps1'),
+    (Join-Path $HOME '.agent-context-broker/tool/scripts/Resolve-AgentContextBrokerHome.ps1')
+) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+if (-not $runtimeHomeResolver) {
+    throw 'Agent Context Broker runtime-home resolver is missing.'
+}
+. $runtimeHomeResolver
+
 function Add-ContextLedgerRow {
     param(
         [Parameter(Mandatory)][string]$Path,
@@ -92,15 +101,11 @@ function Resolve-ReviewLedgerDirectory {
     return $directory
 }
 
-$packageRoot = Split-Path -Parent $PSScriptRoot
 $resolvedRuntimeHome = if ($RuntimeHome) {
-    [IO.Path]::GetFullPath($RuntimeHome)
-}
-elseif ($env:AGENT_CONTEXT_BROKER_HOME) {
-    [IO.Path]::GetFullPath($env:AGENT_CONTEXT_BROKER_HOME)
+    Resolve-AgentContextBrokerHome -Path $RuntimeHome
 }
 else {
-    Join-Path $env:LOCALAPPDATA 'AgentContextBroker'
+    Resolve-AgentContextBrokerHome
 }
 $ticketPackagesRoot = if ($TicketPackagesRoot) {
     [IO.Path]::GetFullPath($TicketPackagesRoot)
@@ -115,26 +120,30 @@ elseif ($env:AGENT_CONTEXT_BROKER_REVIEW_LEDGERS_ROOT) {
     [IO.Path]::GetFullPath($env:AGENT_CONTEXT_BROKER_REVIEW_LEDGERS_ROOT)
 }
 else {
-    Join-Path $resolvedRuntimeHome 'runtime\reviews'
+    Join-Path $resolvedRuntimeHome 'runtime/reviews'
 }
 if ($ReviewKey) {
     Resolve-ReviewLedgerDirectory -Root $reviewLedgersRoot -Key $ReviewKey | Out-Null
 }
-$toolScript = Join-Path $packageRoot 'scripts\agent-context-broker.ps1'
+$toolScript = @(
+    (Join-Path $PSScriptRoot 'agent-context-broker.ps1'),
+    (Join-Path (Split-Path -Parent $PSScriptRoot) 'tool/scripts/agent-context-broker.ps1'),
+    (Join-Path $HOME '.agent-context-broker/tool/scripts/agent-context-broker.ps1')
+) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
 $runtimeRoot = if ($env:AGENT_CONTEXT_BROKER_RECONCILIATION_RUNTIME) {
     $env:AGENT_CONTEXT_BROKER_RECONCILIATION_RUNTIME
 }
 else {
-    Join-Path $resolvedRuntimeHome 'runtime\reconciliation'
+    Join-Path $resolvedRuntimeHome 'runtime/reconciliation'
 }
 $eventRuntimeRoot = if ($env:AGENT_CONTEXT_BROKER_EVENT_RUNTIME) {
     $env:AGENT_CONTEXT_BROKER_EVENT_RUNTIME
 }
 else {
-    Join-Path $resolvedRuntimeHome 'runtime\events'
+    Join-Path $resolvedRuntimeHome 'runtime/events'
 }
-$auditRoot = Join-Path $resolvedRuntimeHome 'runtime\query-audit'
-$ticketAuditRoot = Join-Path $resolvedRuntimeHome 'runtime\ticket-audit'
+$auditRoot = Join-Path $resolvedRuntimeHome 'runtime/query-audit'
+$ticketAuditRoot = Join-Path $resolvedRuntimeHome 'runtime/ticket-audit'
 
 if (-not (Test-Path -LiteralPath $toolScript -PathType Leaf)) {
     throw "Agent Context Broker launcher is missing: $toolScript"
