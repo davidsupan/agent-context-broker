@@ -4,7 +4,9 @@ Agent Context Broker is a local-first, provider-neutral open-source beta for sha
 
 The repository contains a provider-neutral core, schemas, and optional provider bridges. Its current adapters are for Codex and Claude Code.
 
-> **Beta:** `0.10.0-beta.6` is the current release. The API and storage contracts can change while the project is being evaluated.
+> **Beta:** `0.10.0-beta.6` is the current source version. The API and storage contracts can change while the project is being evaluated.
+
+Visit the [Agent Context Broker project site](https://davidsupan.github.io/agent-context-broker/) for a visual introduction, or continue below for the complete technical overview.
 
 ## Why it exists
 
@@ -134,11 +136,20 @@ Bridge packages live under [`providers/`](providers/). Validate the checkout and
 - [`providers/`](providers/): Codex and Claude Code bridge packages.
 - [`schemas/`](schemas/): JSON Schema contracts for sources, claims, snapshots, events, and progress.
 - [`scripts/`](scripts/): Bun launchers, guarded installation and removal, POSIX helpers, and package validation.
-- [`docs/`](docs/): getting started and security guidance.
+- [`site/`](site/): the dependency-free static source for the GitHub Pages project site.
+- [`docs/`](docs/): getting started, architecture, security, release, and repository-maintenance guidance.
+
+## Project participation
+
+- Start with [SUPPORT.md](SUPPORT.md) for help and reporting routes.
+- Read [CONTRIBUTING.md](CONTRIBUTING.md) before proposing or implementing a change.
+- See [GOVERNANCE.md](GOVERNANCE.md) for the maintainer-led decision model.
+- Follow [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) in project spaces.
+- Report vulnerabilities privately according to [SECURITY.md](SECURITY.md).
 
 ## Beta status
 
-This is an early public beta. The current release is `0.10.0-beta.6`; APIs, storage formats, provider bridges, and platform coverage are still subject to change. The repository is suitable for evaluation and focused integration work, but integrations should review the contracts and security behavior before relying on them.
+This is an early public beta. The current source version is `0.10.0-beta.6`; APIs, storage formats, provider bridges, and platform coverage are still subject to change. The repository is suitable for evaluation and focused integration work, but integrations should review the contracts and security behavior before relying on them.
 
 Security fixes are supported on the latest published revision only. See [`SECURITY.md`](SECURITY.md) for responsible disclosure guidance.
 

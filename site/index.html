@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#14171a" media="(prefers-color-scheme: dark)">
+    <meta
+      name="description"
+      content="Agent Context Broker shares small, source-linked context between coding agents without copying raw conversations."
+    >
+    <meta name="robots" content="index,follow">
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self'; img-src 'self' data:; script-src 'none'; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
+    >
+    <link rel="canonical" href="https://davidsupan.github.io/agent-context-broker/">
+    <link rel="stylesheet" href="./styles.css">
+    <title>Agent Context Broker | Source-linked context for coding agents</title>
+  </head>
+  <body id="top">
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <header class="site-header">
+      <div class="shell header-layout">
+        <a class="wordmark" href="#top">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <span>Agent Context Broker</span>
+          <span class="status-chip">beta</span>
+        </a>
+        <nav aria-label="Primary">
+          <ul>
+            <li><a href="https://github.com/davidsupan/agent-context-broker/blob/main/docs/getting-started.md">Getting started</a></li>
+            <li><a href="https://github.com/davidsupan/agent-context-broker/blob/main/docs/architecture.md">Architecture</a></li>
+            <li><a href="https://github.com/davidsupan/agent-context-broker/blob/main/docs/security-model.md">Security</a></li>
+            <li><a href="https://github.com/davidsupan/agent-context-broker/discussions">Discussions</a></li>
+            <li><a href="https://github.com/davidsupan/agent-context-broker">GitHub</a></li>
+          </ul>
+        </nav>
+      </div>
+    </header>
+
+    <main id="main" tabindex="-1">
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="shell hero-layout">
+          <div class="hero-copy">
+            <p class="eyebrow">Open-source beta <span aria-hidden="true">/</span> Local-first <span aria-hidden="true">/</span> Provider-neutral</p>
+            <h1 id="hero-title">Agent Context Broker</h1>
+            <p class="hero-statement">Small, source-linked context between coding agents.</p>
+            <p class="lede">
+              Turn bounded decisions into queryable context for another coding agent. Codex and Claude Code adapters are available; conversations remain private source material.
+            </p>
+            <div class="hero-actions">
+              <a class="button button-primary" href="https://github.com/davidsupan/agent-context-broker/blob/main/docs/getting-started.md">Get started</a>
+              <a class="button" href="https://github.com/davidsupan/agent-context-broker">GitHub</a>
+            </div>
+            <a class="security-link" href="https://github.com/davidsupan/agent-context-broker/blob/main/docs/security-model.md">Read the security model before enabling a hook</a>
+          </div>
+        </div>
+      </section>
+
+      <section class="band preview-band" aria-labelledby="brief-title">
+        <div class="shell">
+          <div class="preview-heading">
+            <p class="eyebrow">A bounded result, not a transcript</p>
+            <h2 id="brief-title">A context brief you can inspect</h2>
+            <p>Accepted claims and short-lived peer progress stay visibly separate, with the source and verification state carried alongside the value.</p>
+          </div>
+          <dl class="facts" aria-label="Project facts">
+            <div><dt>Version</dt><dd>0.10.0-beta.6</dd></div>
+            <div><dt>License</dt><dd>Apache-2.0</dd></div>
+            <div><dt>Runtime</dt><dd>Bun 1.4.x</dd></div>
+            <div><dt>Platforms</dt><dd>Windows, Linux, macOS 13+</dd></div>
+          </dl>
+
+          <figure class="brief">
+            <div class="brief-topline">
+              <span>context brief</span>
+              <span>scope: project/example-service</span>
+              <span>consumer: claude-code</span>
+            </div>
+
+            <div class="brief-section">
+              <p class="brief-label"><span class="marker marker-accepted" aria-hidden="true"></span>Accepted context <span>reconciled, hash-checked</span></p>
+              <div class="table-scroll" role="region" aria-label="Accepted context example" tabindex="0">
+                <table>
+                  <caption class="visually-hidden">Accepted claims in the synthetic context brief</caption>
+                  <thead>
+                    <tr><th scope="col">Key</th><th scope="col">Value</th><th scope="col">Provider</th><th scope="col">Source hash</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr class="brief-row"><th scope="row">release.tag</th><td>v0.10.0-beta.6</td><td>codex</td><td>3f9c...e21a</td></tr>
+                    <tr class="brief-row"><th scope="row">ci.required-checks</th><td>linux, windows, macos</td><td>claude-code</td><td>8b1d...77f0</td></tr>
+                    <tr class="brief-row"><th scope="row">install.mode</th><td>plan-only by default</td><td>codex</td><td>c04e...9a53</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="brief-section brief-progress">
+              <p class="brief-label"><span class="marker marker-progress" aria-hidden="true"></span>Live peer progress <span>unverified; verify canonical sources</span></p>
+              <p><strong>thread ...7f3a2c</strong> <span>active / validation / codex / expires in 58 min</span></p>
+              <p>Adapter conformance fixtures updated; provider tests pending.</p>
+              <p class="brief-warning">Warning: expired peer progress excluded</p>
+            </div>
+
+            <p class="brief-foot">No raw peer conversation, prompt, response, transcript, tool argument, tool result, or native session identifier was imported.</p>
+            <figcaption>Illustrative context brief with synthetic values. Accepted claims and live peer progress are deliberately separated.</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section class="band" aria-labelledby="why-title">
+        <div class="shell prose-grid">
+          <p class="section-index" aria-hidden="true">01</p>
+          <div>
+            <h2 id="why-title">Why a broker exists</h2>
+            <p class="section-lede">Coding agents often need a small amount of trusted context from earlier work. Passing whole transcripts between tools creates privacy, size, and provenance problems.</p>
+            <p>The broker carries forward bounded facts and short-lived work state, keeps provider histories private, and makes provenance, freshness, and verification state visible to the agent that asks.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="band band-muted" aria-labelledby="boundary-title">
+        <div class="shell">
+          <div class="section-heading">
+            <p class="section-index" aria-hidden="true">02</p>
+            <h2 id="boundary-title">What crosses the boundary, and what never does</h2>
+          </div>
+          <div class="boundary-grid">
+            <div class="boundary-column">
+              <h3><span class="marker marker-accepted" aria-hidden="true"></span>Shared as structured context</h3>
+              <ul class="signal-list">
+                <li>bounded facts and derived claims with source hashes</li>
+                <li>short-lived work state for related in-flight tasks</li>
+                <li>provider, provenance, freshness, and verification state</li>
+                <li>metadata-only audit records with hashes, counts, warnings, and dispositions</li>
+              </ul>
+            </div>
+            <div class="boundary-column">
+              <h3><span class="marker marker-progress" aria-hidden="true"></span>Never passed to another agent</h3>
+              <ul class="signal-list">
+                <li>raw prompts and responses</li>
+                <li>tool arguments and tool results</li>
+                <li>native session, record, and source identifiers</li>
+                <li>credentials and secret-like values rejected by content safety</li>
+              </ul>
+              <p><strong>Adapters are read-only.</strong> They never modify, archive, or delete native histories.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="band" aria-labelledby="flow-title">
+        <div class="shell">
+          <div class="section-heading">
+            <p class="section-index" aria-hidden="true">03</p>
+            <div>
+              <h2 id="flow-title">How context moves between providers</h2>
+              <p>Adapters are thin bridges. Either provider can be the source or the consumer, and the same core applies the same checks.</p>
+            </div>
+          </div>
+          <ol class="flow">
+            <li><strong>Inventory or propose</strong><span>An adapter inventories bounded metadata or submits a structured proposal.</span></li>
+            <li><strong>Validate</strong><span>The core checks paths, schemas, source attestation, content safety, freshness, and expected state.</span></li>
+            <li><strong>Reconcile</strong><span>A claim becomes accepted context, stays pending, or is rejected with a reason.</span></li>
+            <li><strong>Route</strong><span>A query returns the smallest matching accepted context and labels peer progress separately.</span></li>
+            <li><strong>Audit</strong><span>Metadata-only records capture hashes, counts, and dispositions without conversation content.</span></li>
+          </ol>
+          <p class="rule-note"><strong>Availability fails open.</strong> An unavailable broker does not block the agent. <strong>Integrity fails closed.</strong> Invalid data is never imported or promoted.</p>
+        </div>
+      </section>
+
+      <section class="band band-ink" aria-labelledby="kinds-title">
+        <div class="shell">
+          <div class="section-heading">
+            <p class="section-index" aria-hidden="true">04</p>
+            <div>
+              <h2 id="kinds-title">Two kinds of context, kept apart</h2>
+              <p>Accepted means a claim passed reconciliation and integrity checks. It does not mean the claim is guaranteed to be factually true.</p>
+            </div>
+          </div>
+          <div class="table-scroll" role="region" aria-label="Context type comparison" tabindex="0">
+            <table class="comparison">
+              <caption class="visually-hidden">Accepted context compared with live peer progress</caption>
+              <thead><tr><th scope="col">Property</th><th scope="col"><span class="marker marker-accepted" aria-hidden="true"></span>Accepted context</th><th scope="col"><span class="marker marker-progress" aria-hidden="true"></span>Live peer progress</th></tr></thead>
+              <tbody>
+                <tr><th scope="row">Purpose</th><td>Durable facts another agent can build on</td><td>Coordination hints while related work is in flight</td></tr>
+                <tr><th scope="row">Entry path</th><td>Structured candidate claim reconciled against the current snapshot</td><td>Immutable progress publication from a task</td></tr>
+                <tr><th scope="row">Checks</th><td>Schema, content safety, evidence, freshness, expected state, and hashes</td><td>Schema and content safety; never reconciled</td></tr>
+                <tr><th scope="row">Label</th><td>Accepted</td><td>Always unverified</td></tr>
+                <tr><th scope="row">Lifetime</th><td>Until replaced by a reconciled successor</td><td>Expires by time to live</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="band" aria-labelledby="trust-title">
+        <div class="shell">
+          <div class="section-heading">
+            <p class="section-index" aria-hidden="true">05</p>
+            <h2 id="trust-title">Trust boundaries you can inspect</h2>
+          </div>
+          <dl class="trust-grid">
+            <div><dt>Local-first</dt><dd>The broker runs as local Bun scripts with no hosted component. Runtime state stays in a private per-user directory.</dd></div>
+            <div><dt>Strict isolation</dt><dd><code>AGENT_CONTEXT_BROKER_STRICT_ISOLATION=1</code> returns before registry reads or audit writes.</dd></div>
+            <div><dt>Provenance</dt><dd>Claims carry source hashes. Accepted snapshots are content-addressed and hashes are checked again on read.</dd></div>
+            <div><dt>Metadata-only audit</dt><dd>Audit records contain hashes, counts, watermarks, warnings, and dispositions, never prompts or responses.</dd></div>
+          </dl>
+        </div>
+      </section>
+
+      <section class="band band-muted" aria-labelledby="install-title">
+        <div class="shell install-grid">
+          <div>
+            <p class="section-index" aria-hidden="true">06</p>
+            <h2 id="install-title">Guarded installation</h2>
+            <p>Installation is plan-only by default. Activation proceeds only when the exact manifest and plan digests are passed back to the unchanged command.</p>
+            <p>The installer preserves existing lifecycle handlers, creates byte-exact backups, and supports plan-bound removal and rollback.</p>
+            <a href="https://github.com/davidsupan/agent-context-broker/blob/main/docs/getting-started.md">Full install, verify, remove, and rollback flow</a>
+          </div>
+          <pre tabindex="0"><code>bun scripts/manage-agent-context-broker-installation.mjs install \
+  --provider both &gt; install-plan.json
+
+bun scripts/manage-agent-context-broker-installation.mjs install \
+  --provider both \
+  --expected-manifest-digest &lt;manifestDigest&gt; \
+  --expected-plan-digest &lt;planDigest&gt; \
+  --execute</code></pre>
+        </div>
+      </section>
+
+      <section class="band" aria-labelledby="adapters-title">
+        <div class="shell">
+          <div class="section-heading">
+            <p class="section-index" aria-hidden="true">07</p>
+            <div>
+              <h2 id="adapters-title">Adapters and platforms</h2>
+              <p>Codex and Claude Code adapters translate provider lifecycle input into the same provider-neutral command surface. Other providers are not advertised as supported by this beta.</p>
+            </div>
+          </div>
+          <div class="table-scroll" role="region" aria-label="Runtime and platform support" tabindex="0">
+            <table class="support-table">
+              <caption class="visually-hidden">Supported runtime and platforms</caption>
+              <tbody>
+                <tr><th scope="row">Runtime</th><td>Bun 1.4.x, the only runtime dependency</td></tr>
+                <tr><th scope="row">Operating systems</th><td>Windows, Linux, macOS 13 or newer</td></tr>
+                <tr><th scope="row">macOS hardware</th><td>Apple Silicon and Intel supported by Bun 1.4</td></tr>
+                <tr><th scope="row">Not required</th><td>PowerShell, Node.js, npm</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <a href="https://github.com/davidsupan/agent-context-broker/blob/main/adapters/CONTRACT.md">Read the adapter contract</a>
+        </div>
+      </section>
+
+      <section class="band band-cta" aria-labelledby="start-title">
+        <div class="shell start-grid">
+          <div>
+            <p class="eyebrow">Early public beta</p>
+            <h2 id="start-title">Inspect the contracts. Run the tests. Keep the context bounded.</h2>
+            <p>APIs, storage formats, provider bridges, and platform coverage can still change. Evaluate the security model before relying on an integration.</p>
+            <div class="hero-actions">
+              <a class="button button-primary" href="https://github.com/davidsupan/agent-context-broker/discussions">Open Discussions</a>
+              <a class="button" href="https://github.com/davidsupan/agent-context-broker/blob/main/CONTRIBUTING.md">Read CONTRIBUTING</a>
+            </div>
+          </div>
+          <pre tabindex="0"><code>git clone https://github.com/davidsupan/agent-context-broker.git
+cd agent-context-broker
+bun run validate
+bun pm pack --dry-run</code></pre>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="shell footer-layout">
+        <div>
+          <p><strong>Apache License 2.0.</strong> Maintainer-led project.</p>
+          <p>This page loads no third-party resources and sets no cookies.</p>
+          <p>Codex and Claude Code are products of their respective owners. This project is independent.</p>
+        </div>
+        <nav aria-label="Project documents">
+          <ul>
+            <li><a href="https://github.com/davidsupan/agent-context-broker/blob/main/GOVERNANCE.md">Governance</a></li>
+            <li><a href="https://github.com/davidsupan/agent-context-broker/blob/main/CODE_OF_CONDUCT.md">Code of Conduct</a></li>
+            <li><a href="https://github.com/davidsupan/agent-context-broker/blob/main/SUPPORT.md">Support</a></li>
+            <li><a href="https://github.com/davidsupan/agent-context-broker/blob/main/SECURITY.md">Security policy</a></li>
+            <li><a href="https://github.com/davidsupan/agent-context-broker/releases">Releases</a></li>
+          </ul>
+        </nav>
+      </div>
+    </footer>
+  </body>
+</html>

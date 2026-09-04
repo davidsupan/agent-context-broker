@@ -2,7 +2,16 @@
   "name": "agent-context-broker",
   "version": "0.10.0-beta.6",
   "description": "A local-first, metadata-only context broker for coding agents.",
+  "author": "David Supan",
   "license": "Apache-2.0",
+  "keywords": [
+    "ai-agents",
+    "claude-code",
+    "codex",
+    "context-management",
+    "developer-tools",
+    "local-first"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/davidsupan/agent-context-broker.git"
@@ -10,12 +19,30 @@
   "bugs": {
     "url": "https://github.com/davidsupan/agent-context-broker/issues"
   },
-  "homepage": "https://github.com/davidsupan/agent-context-broker#readme",
+  "homepage": "https://davidsupan.github.io/agent-context-broker/",
   "engines": {
     "bun": ">=1.4.0 <2"
   },
   "packageManager": "bun@1.4.1",
   "type": "module",
+  "files": [
+    "adapters",
+    "docs",
+    "examples",
+    "fixtures",
+    "profiles",
+    "providers",
+    "schemas",
+    "scripts",
+    "src",
+    "test",
+    "CODE_OF_CONDUCT.md",
+    "CONTRIBUTING.md",
+    "GOVERNANCE.md",
+    "LICENSE.md",
+    "SECURITY.md",
+    "SUPPORT.md"
+  ],
   "bin": {
     "agent-context": "scripts/agent-context.mjs",
     "agent-context-broker": "src/cli.mjs",

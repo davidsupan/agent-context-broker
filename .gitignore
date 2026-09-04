@@ -119,4 +119,9 @@ $RECYCLE.BIN/
 runtime/
 tmp/
 
+# Keep the dependency-free project site tracked even when a user-level ignore
+# file excludes generic /site directories.
+!/site/
+!/site/**
+
 # End of https://www.toptal.com/developers/gitignore/api/node,windows,macos,visualstudiocode
