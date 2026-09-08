@@ -233,6 +233,39 @@ describe('peer progress', () => {
     assert.equal(output.writesEnabled, false);
   });
 
+  test('shared wrapper preserves safe rejection diagnostics in both scopes and modes', async () => {
+    const runtimeRoot = root('diagnostic-runtime');
+    const eventRuntimeRoot = root('diagnostic-events');
+    for (const provider of ['codex', 'claude-code']) {
+      const token = await source(eventRuntimeRoot, provider, 'diagnostic');
+      for (const threadScope of [false, true]) {
+        const input = proposal(token, 'APP-10003', 'QA checkpoint', {
+          changedSurfaces: ['C:\\qa-runtime\\fixture']
+        });
+        if (threadScope) {
+          input.scope = { kind: 'project', key: 'example-project' };
+          input.work = { kind: 'thread', key: 'current' };
+        }
+        const proposalPath = join(root('diagnostic-input'), 'proposal.json');
+        writeFileSync(proposalPath, JSON.stringify(input));
+        for (const execute of [false, true]) {
+          const result = spawnSync(process.execPath, [sharedWrapper(), 'progress',
+            '--provider', provider, '--proposal', proposalPath,
+            ...(execute ? ['--execute'] : [])], {
+            encoding: 'utf8',
+            env: { ...process.env,
+              AGENT_CONTEXT_BROKER_RECONCILIATION_RUNTIME: runtimeRoot,
+              AGENT_CONTEXT_BROKER_EVENT_RUNTIME: eventRuntimeRoot }
+          });
+          assert.equal(result.status, 1);
+          assert.match(result.stderr, /Peer progress contains unsafe content: absolute-path/u);
+          assert.equal(result.stdout, '');
+          assert.ok(!result.stderr.includes('qa-runtime'));
+        }
+      }
+    }
+  });
+
   test('shared wrapper executes progress and appends metadata-only ticket audit', async () => {
     const runtimeRoot = root('wrapper-execute-runtime');
     const eventRuntimeRoot = root('wrapper-execute-events');
