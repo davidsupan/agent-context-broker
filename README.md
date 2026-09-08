@@ -4,7 +4,7 @@ Agent Context Broker is a local-first, provider-neutral open-source beta for sha
 
 The repository contains a provider-neutral core, schemas, and optional provider bridges. Its current adapters are for Codex and Claude Code.
 
-> **Beta:** `0.10.0-beta.6` is the current source version. The API and storage contracts can change while the project is being evaluated.
+> **Beta:** `0.10.0-beta.7` is the current source version. The API and storage contracts can change while the project is being evaluated.
 
 Visit the [Agent Context Broker project site](https://davidsupan.github.io/agent-context-broker/) for a visual introduction, or continue below for the complete technical overview.
 
@@ -149,7 +149,7 @@ Bridge packages live under [`providers/`](providers/). Validate the checkout and
 
 ## Beta status
 
-This is an early public beta. The current source version is `0.10.0-beta.6`; APIs, storage formats, provider bridges, and platform coverage are still subject to change. The repository is suitable for evaluation and focused integration work, but integrations should review the contracts and security behavior before relying on them.
+This is an early public beta. The current source version is `0.10.0-beta.7`; APIs, storage formats, provider bridges, and platform coverage are still subject to change. The repository is suitable for evaluation and focused integration work, but integrations should review the contracts and security behavior before relying on them.
 
 Security fixes are supported on the latest published revision only. See [`SECURITY.md`](SECURITY.md) for responsible disclosure guidance.
 

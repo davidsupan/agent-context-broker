@@ -1,6 +1,6 @@
 {
   "name": "agent-context-broker",
-  "version": "0.10.0-beta.6",
+  "version": "0.10.0-beta.7",
   "description": "A local-first, metadata-only context broker for coding agents.",
   "author": "David Supan",
   "license": "Apache-2.0",

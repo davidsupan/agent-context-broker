@@ -266,25 +266,41 @@ function expectedHead(events) {
 
 export function verifyEventStore(inputOptions = {}) {
   if (!inputOptions.runtimeRoot) throw new Error('Broker event runtime root is required.');
+  const headPath = join(resolve(inputOptions.runtimeRoot), 'events', 'head.json');
+  const lockPath = join(resolve(inputOptions.runtimeRoot), 'events', 'event-store.lock');
+  const readHead = () => existsSync(headPath) ? readFileSync(headPath, 'utf8') : null;
+  // Records and head are separate atomic writes. A concurrent append must not
+  // make a reader compare an older record list with a newer committed head.
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const before = readHead();
+    const result = verifyEventRecords(inputOptions.runtimeRoot);
+    const after = readHead();
+    if (before !== after) continue;
+    const actual = after === null ? null : JSON.parse(after);
+    if ((actual === null && result.events.length === 0) ||
+        stableJson(actual) === stableJson(result.head)) return result;
+    if (!existsSync(lockPath)) {
+      throw new Error(actual === null
+        ? 'Broker event head is missing.'
+        : 'Broker event head verification failed.');
+    }
+  }
+  const error = new Error('Broker event store changed during verification; retry the read.');
+  error.name = 'LockBusy';
+  throw error;
+}
+
+function verifyEventRecords(runtimeRoot) {
   const events = [];
   let previousEventHash = null;
-  for (const [index, path] of recordFiles(inputOptions.runtimeRoot).entries()) {
+  for (const [index, path] of recordFiles(runtimeRoot).entries()) {
     const event = JSON.parse(readFileSync(path, 'utf8'));
     const expectedSequence = index + 1;
     validateStoredEvent(event, path, expectedSequence, previousEventHash);
     events.push(event);
     previousEventHash = event.eventId;
   }
-  const expected = expectedHead(events);
-  const headPath = join(resolve(inputOptions.runtimeRoot), 'events', 'head.json');
-  if (events.length > 0 || existsSync(headPath)) {
-    if (!existsSync(headPath)) throw new Error('Broker event head is missing.');
-    const actual = JSON.parse(readFileSync(headPath, 'utf8'));
-    if (stableJson(actual) !== stableJson(expected)) {
-      throw new Error('Broker event head verification failed.');
-    }
-  }
-  return { events, head: expected };
+  return { events, head: expectedHead(events) };
 }
 
 export function planBrokerEvent(inputOptions = {}) {
