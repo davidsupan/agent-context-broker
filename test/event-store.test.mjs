@@ -72,6 +72,35 @@ afterEach(() => {
 });
 
 describe('append-only broker event store', () => {
+  test('an append between record and head publication is busy, not corrupt', async () => {
+    const runtimeRoot = root('pending-head');
+    await appendBrokerEvent({ runtimeRoot, event: candidate(), execute: true });
+    const headPath = join(runtimeRoot, 'events', 'head.json');
+    const firstHead = readFileSync(headPath, 'utf8');
+    await appendBrokerEvent({ runtimeRoot, event: candidate(), execute: true });
+    const secondHead = readFileSync(headPath, 'utf8');
+    const lockPath = join(runtimeRoot, 'events', 'event-store.lock');
+    // Recreate the real writer window: the new record exists but its head
+    // has not been published yet, and the writer still owns the lock.
+    writeFileSync(lockPath, JSON.stringify({ processId: process.pid }));
+    writeFileSync(headPath, firstHead);
+    assert.throws(() => verifyEventStore({ runtimeRoot }), { name: 'LockBusy' });
+    assert.equal(readFileSync(headPath, 'utf8'), firstHead);
+    writeFileSync(headPath, secondHead);
+    unlinkSync(lockPath);
+    assert.equal(verifyEventStore({ runtimeRoot }).events.length, 2);
+  });
+
+  test('a stable incorrect head still fails integrity verification', async () => {
+    const runtimeRoot = root('incorrect-head');
+    await appendBrokerEvent({ runtimeRoot, event: candidate(), execute: true });
+    const headPath = join(runtimeRoot, 'events', 'head.json');
+    const head = JSON.parse(readFileSync(headPath, 'utf8'));
+    head.headHash = '0'.repeat(64);
+    writeFileSync(headPath, JSON.stringify(head));
+    assert.throws(() => verifyEventStore({ runtimeRoot }), /head verification failed/u);
+  });
+
   test('planning validates without creating runtime files', () => {
     const runtimeRoot = root('plan');
     const plan = planBrokerEvent({ event: candidate() });
