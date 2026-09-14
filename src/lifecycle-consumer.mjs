@@ -16,6 +16,7 @@ import { pathToFileURL } from 'node:url';
 
 import {
   deliverLifecycleOutbox,
+  observedAtFor,
   persistLifecycleOutbox,
   sourceAttestation
 } from './lifecycle-events.mjs';
@@ -515,7 +516,10 @@ export function createLifecycleConsumer(inputDefinition) {
               attestation: sourceAttestation(
                 definition.provider,
                 currentSource,
-                inventoryResult.inventory.generatedAt
+                // Must match the observed time the outbox attests with, or the planned
+                // token and the delivered attestation hash differently and the advisory
+                // silently drops its source token.
+                observedAtFor(currentSource, inventoryResult.inventory.generatedAt)
               )
             })
           : null;

@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
-import { appendBrokerEvent, sha256, stableJson } from './event-store.mjs';
+import { appendBrokerEvents, sha256, stableJson } from './event-store.mjs';
 import { attestSource, planSourceAttestation } from './source-attestation.mjs';
 
 export function sourceAttestation(provider, source, observedAt) {
@@ -54,10 +54,22 @@ function deltaEvent(provider, delta, source, attestation, observedAt) {
   };
 }
 
+// Valid time is a property of the source, not of the run that happened to read it.
+// Using the run timestamp collapses an entire ingested history into one instant, which
+// makes months-old threads look freshly observed; a backfill then outranks current
+// context. The source's own newest record is the honest answer, and for a live session
+// it is seconds old, so live behaviour is unchanged.
+export function observedAtFor(source, fallback) {
+  const candidate = source?.lastEventAt;
+  return typeof candidate === 'string' && !Number.isNaN(Date.parse(candidate))
+    ? new Date(candidate).toISOString()
+    : fallback;
+}
+
 export function lifecycleOutboxEntry(inventory, deltas) {
   const sources = new Map(inventory.sources.map((source) => [source.sourceId, source]));
   const attestations = inventory.sources.map((source) =>
-    sourceAttestation(inventory.provider, source, inventory.generatedAt)
+    sourceAttestation(inventory.provider, source, observedAtFor(source, inventory.generatedAt))
   );
   const bySource = new Map(attestations.map((item, index) => [
     inventory.sources[index].sourceId,
@@ -73,7 +85,7 @@ export function lifecycleOutboxEntry(inventory, deltas) {
       delta,
       sources.get(delta.sourceId),
       bySource.get(delta.sourceId),
-      inventory.generatedAt
+      observedAtFor(sources.get(delta.sourceId), inventory.generatedAt)
     ))
   };
 }
@@ -118,14 +130,18 @@ export async function deliverLifecycleOutbox(inputOptions) {
       eventIds.push(result.eventId);
       attestedSubjectRefs.add(result.subjectRef);
     }
-    for (const event of outbox.events) {
-      const result = await appendBrokerEvent({
+    if (outbox.events.length > 0) {
+      // One batch per outbox entry: delivery is the path a historical backfill takes,
+      // and appending per event made that cost grow with the store.
+      const results = await appendBrokerEvents({
         runtimeRoot: inputOptions.eventRuntimeRoot,
-        event,
+        events: outbox.events,
         execute: true
       });
-      eventIds.push(result.eventId);
-      deliveredEvents += 1;
+      for (const result of results) {
+        eventIds.push(result.eventId);
+        deliveredEvents += 1;
+      }
     }
     inputOptions.atomicWriter(receiptPath, `${JSON.stringify({
       schemaVersion: 1,

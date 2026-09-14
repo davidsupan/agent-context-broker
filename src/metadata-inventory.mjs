@@ -645,7 +645,15 @@ async function runInventoryLocked(options) {
         runId,
         provider: adapter.provider,
         sourceId,
-        observedAt: nowIso,
+        // Valid time comes from the source, transaction time from the run. For a live
+        // session the newest record is seconds old so this is indistinguishable from
+        // now, but when ingesting history it is the difference between "this happened
+        // in May" and "we learned everything today" — without it a backfill makes old
+        // threads outrank current context.
+        observedAt: typeof segment.lastEventAt === 'string' &&
+          !Number.isNaN(Date.parse(segment.lastEventAt))
+          ? new Date(segment.lastEventAt).toISOString()
+          : nowIso,
         expiresAt: expiryFor(
           threadState,
           options.now,
