@@ -166,13 +166,18 @@ describe('peer progress', () => {
     assert.equal(plan.threadRef, plan.work.key);
     await publishPeerProgress({ ...input, execute: true });
 
+    // Every read here pins the clock. Peer progress is TTL-bounded by design, so a read
+    // that defaults to the wall clock stops testing routing the moment the fixture's TTL
+    // elapses and starts testing expiry instead.
     const unrelated = readPeerProgress({
       runtimeRoot, eventRuntimeRoot, provider: 'claude-code', crossProvider: true,
-      scopeKind: 'project', scopeKey: 'example-project', terms: []
+      scopeKind: 'project', scopeKey: 'example-project', terms: [],
+      now: '2026-09-03T08:10:00.000Z'
     });
     const related = readPeerProgress({
       runtimeRoot, eventRuntimeRoot, provider: 'claude-code', crossProvider: true,
-      scopeKind: 'project', scopeKey: 'example-project', terms: ['skill', 'release']
+      scopeKind: 'project', scopeKey: 'example-project', terms: ['skill', 'release'],
+      now: '2026-09-03T08:10:00.000Z'
     });
 
     assert.equal(unrelated.progress.length, 0);
@@ -562,7 +567,7 @@ describe('peer progress', () => {
     assert.equal(sameOnly.progress.length, 0);
     const isolated = readPeerProgress({
       runtimeRoot, eventRuntimeRoot, provider: 'codex', strictIsolation: true,
-      scopeKind: 'ticket', scopeKey: 'APP-30001'
+      scopeKind: 'ticket', scopeKey: 'APP-30001', now: '2026-08-26T08:10:00.000Z'
     });
     assert.deepEqual(isolated, { progress: [], warnings: [] });
   });
@@ -817,9 +822,11 @@ describe('peer progress', () => {
     const artifact = JSON.parse(readFileSync(path, 'utf8'));
     artifact.summary = 'Tampered progress';
     writeFileSync(path, `${JSON.stringify(artifact, null, 2)}\n`, 'utf8');
+    // Pinned so the throw proves tamper detection rather than the record quietly aging
+    // out before verification ever looks at it.
     assert.throws(() => readPeerProgress({
       runtimeRoot, eventRuntimeRoot, provider: 'codex',
-      scopeKind: 'ticket', scopeKey: 'APP-70001'
+      scopeKind: 'ticket', scopeKey: 'APP-70001', now: '2026-08-26T08:10:00.000Z'
     }), /verification failed/u);
   });
 });
