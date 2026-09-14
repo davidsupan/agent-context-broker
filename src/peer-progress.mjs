@@ -19,7 +19,7 @@ import {
   sha256,
   stableJson,
   stableValue,
-  verifyEventStore
+  verifyEventTail
 } from './event-store.mjs';
 import { provenanceForSourceToken } from './source-attestation.mjs';
 import {
@@ -342,9 +342,27 @@ function verifiedArtifact(runtimeRoot, event) {
   return artifact;
 }
 
-function currentProgressEvents(eventRuntimeRoot) {
-  const events = verifyEventStore({ runtimeRoot: eventRuntimeRoot }).events
-    .filter((event) => event.eventType === 'peer-progress.published');
+// Peer progress is read on every prompt, so it must not cost a full chain walk.
+// No progress artifact can outlive the maximum TTL, so anything recorded before that
+// horizon is already expired and cannot become current. Read a bounded tail and widen
+// it only until the horizon is covered, so the usual case reads a handful of records
+// rather than the entire store.
+const MAX_PROGRESS_TTL_SECONDS = 2592000;
+const PROGRESS_TAIL_START = 512;
+const PROGRESS_TAIL_MAX = 16384;
+
+function currentProgressEvents(eventRuntimeRoot, now = new Date()) {
+  const horizon = now.getTime() - (MAX_PROGRESS_TTL_SECONDS * 1000);
+  let count = PROGRESS_TAIL_START;
+  let tail = verifyEventTail({ runtimeRoot: eventRuntimeRoot, count });
+  while (tail.truncated && count < PROGRESS_TAIL_MAX) {
+    const oldest = tail.events[0];
+    // The window already reaches past the horizon, so nothing older can still be live.
+    if (oldest && Date.parse(oldest.recordedAt) <= horizon) break;
+    count *= 2;
+    tail = verifyEventTail({ runtimeRoot: eventRuntimeRoot, count });
+  }
+  const events = tail.events.filter((event) => event.eventType === 'peer-progress.published');
   const current = new Map();
   for (const event of events) current.set(event.payload.actorKey, event);
   return [...current.values()];

@@ -303,6 +303,74 @@ function verifyEventRecords(runtimeRoot) {
   return { events, head: expectedHead(events) };
 }
 
+// A tail read verifies the newest `count` records: each record's own identity and
+// payload hash, the links between them, and that the last one is exactly the
+// committed head. It deliberately does NOT walk back to the genesis event.
+//
+// That is a weaker guarantee than verifyEventStore, and it is scoped to match it:
+// the only caller is the peer-progress reader, whose data is explicitly unverified,
+// TTL-bounded coordination state. Re-deriving the whole hash chain on every prompt
+// to read unverified data is disproportionate, and it degrades linearly forever as
+// the store grows. Anything that feeds the accepted-claim lane must keep using
+// verifyEventStore, which still proves the chain from genesis.
+export function verifyEventTail(inputOptions = {}) {
+  if (!inputOptions.runtimeRoot) throw new Error('Broker event runtime root is required.');
+  const root = resolve(inputOptions.runtimeRoot);
+  const count = Number.isSafeInteger(inputOptions.count) && inputOptions.count > 0
+    ? inputOptions.count
+    : 512;
+  const headPath = join(root, 'events', 'head.json');
+  const lockPath = join(root, 'events', 'event-store.lock');
+  const readHead = () => existsSync(headPath) ? readFileSync(headPath, 'utf8') : null;
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const before = readHead();
+    const paths = recordFiles(root);
+    if (paths.length === 0) {
+      const after = readHead();
+      if (before !== after) continue;
+      if (after !== null) throw new Error('Broker event head verification failed.');
+      return { events: [], head: expectedHead([]), tailOnly: true, truncated: false };
+    }
+
+    const startIndex = Math.max(0, paths.length - count);
+    const events = [];
+    // The record immediately before the tail anchors the first link. When the tail
+    // starts at the genesis event there is nothing before it, so the anchor is null.
+    let previousEventHash = null;
+    if (startIndex > 0) {
+      const anchor = JSON.parse(readFileSync(paths[startIndex - 1], 'utf8'));
+      previousEventHash = anchor.eventId;
+    }
+    for (let index = startIndex; index < paths.length; index += 1) {
+      const event = JSON.parse(readFileSync(paths[index], 'utf8'));
+      validateStoredEvent(event, paths[index], index + 1, previousEventHash);
+      events.push(event);
+      previousEventHash = event.eventId;
+    }
+
+    const after = readHead();
+    if (before !== after) continue;
+    const actual = after === null ? null : JSON.parse(after);
+    if (actual !== null && stableJson(actual) === stableJson(expectedHead(events))) {
+      return {
+        events,
+        head: actual,
+        tailOnly: true,
+        truncated: startIndex > 0
+      };
+    }
+    if (!existsSync(lockPath)) {
+      throw new Error(actual === null
+        ? 'Broker event head is missing.'
+        : 'Broker event head verification failed.');
+    }
+  }
+  const error = new Error('Broker event store changed during verification; retry the read.');
+  error.name = 'LockBusy';
+  throw error;
+}
+
 export function planBrokerEvent(inputOptions = {}) {
   validateEventInput(inputOptions.event);
   return {
