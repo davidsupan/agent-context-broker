@@ -14,7 +14,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { reconcileClaimBatch } from '../src/reconciliation.mjs';
+import { planReconciliation, reconcileClaimBatch } from '../src/reconciliation.mjs';
 
 function parseArgs(argv) {
   const options = { execute: false };
@@ -103,12 +103,13 @@ if (overridden.length > 0) {
 console.log('mode             : ' + (options.execute ? 'execute' : 'plan (no writes)'));
 console.log('');
 
-const result = await reconcileClaimBatch({
-  runtimeRoot: resolve(options.runtimeRoot),
-  batch,
-  execute: options.execute,
-  now: new Date().toISOString()
-});
+// Plan mode has to go through the planner. reconcileClaimBatch refuses without execute,
+// so routing both modes through it made the advertised dry run throw instead of showing
+// what would happen - the opposite of what a plan mode is for.
+const now = new Date().toISOString();
+const result = options.execute
+  ? await reconcileClaimBatch({ runtimeRoot: resolve(options.runtimeRoot), batch, execute: true, now })
+  : planReconciliation({ runtimeRoot: resolve(options.runtimeRoot), batch, now });
 
 const serialised = JSON.stringify(result);
 const heldForReview = serialised.includes('evidence-review');

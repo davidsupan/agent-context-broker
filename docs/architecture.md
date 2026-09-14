@@ -129,6 +129,41 @@ per-file 1.74x to 23.64x with a 3.92x median. Level 19 reaches about 4.12x but c
 roughly 50x the compression time, which is hours instead of minutes across the whole
 corpus for about 11% more compression.
 
+Pruning is a separate, two-phase act. `scripts/prune-archived-corpus.mjs` moves originals
+into a quarantine directory and records the hash each file had at move time; `--restore`
+puts them back and re-checks those hashes. It therefore frees no space by itself, and
+reclaiming the space means deleting the quarantine, which is the irreversible step and is
+left to a human. Nothing moves on the manifest's word: each candidate is re-hashed live
+and its archive entry decompressed at prune time, so a rollout that was rewritten in place
+is reported and left alone. A retention window keeps recent, still-active transcripts
+where the agents expect them.
+
+## The model-assisted lane
+
+Ingestion above stores metadata only — no conversation text reaches the event store. The
+model-assisted lane is the one path from transcript content to claims, and it is built as
+a dead end for trust rather than a shortcut into it.
+
+`scripts/extract-handoff-candidates.mjs` proposes candidates from operator turns. It is a
+deterministic candidate generator, not a summariser: a model-assisted extractor would
+replace its matching step and keep everything else, because everything else is what makes
+the output safe to look at. Two properties carry that weight:
+
+- **It mines the operator, not the agent.** Sidechain turns are subagent prompts written
+  by an agent, and harness-injected blocks arrive inside otherwise genuine turns. Both are
+  excluded structurally, not by how they read, because laundering agent-authored text into
+  operator decisions is the exact inversion this lane exists to prevent.
+- **Valid time comes from the transcript.** A conclusion drawn in April is an April
+  observation recorded today, so old threads cannot outrank current context.
+
+`scripts/propose-handoff-claims.mjs` then forces `evidenceClass: 'agent-handoff'` and
+`verification: 'unverified'` regardless of what the extractor asked for, and fails if
+reconciliation did not hold the batch for evidence review. Submitted claims land in the
+review queue only: the event store is untouched, and accepted context never sees them.
+Promotion means resubmitting a claim with canonical-artifact or observed-tool-result
+evidence the broker can check. Precision in the extractor therefore buys a shorter review
+queue, never trust.
+
 ## Trust boundaries
 
 Provider histories remain private source material. Accepted claims are not
