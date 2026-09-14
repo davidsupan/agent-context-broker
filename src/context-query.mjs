@@ -17,7 +17,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 import { loadContextProfiles, routeContextProfile } from './context-router.mjs';
 import { readPeerProgress } from './peer-progress.mjs';
-import { reviewLedgerContext } from './work-ledgers.mjs';
+import { relationsForScope, reviewLedgerContext } from './work-ledgers.mjs';
 
 const PROVIDERS = new Set(['codex', 'claude-code']);
 const HASH = /^[a-f0-9]{64}$/u;
@@ -59,6 +59,33 @@ function stableJson(value) {
 
 function hash(value) {
   return createHash('sha256').update(String(value), 'utf8').digest('hex');
+}
+
+function acceptedScopeRelations(options) {
+  const primary = scopeRelation(options.scopeKind, options.scopeKey);
+  const keys = new Map([[primary, 'primary']]);
+  if (!options.scopeKind || !options.scopeKey) return keys;
+  let related = [];
+  try {
+    related = relationsForScope(
+      { kind: options.scopeKind, key: options.scopeKey },
+      {
+        ticketPackagesRoot: options.ticketPackagesRoot,
+        reviewLedgersRoot: options.reviewLedgersRoot,
+        requireReviewLedger: false
+      }
+    ) ?? [];
+  } catch {
+    // Relation expansion is an enrichment, never a gate: a missing or unreadable
+    // ledger must not remove the primary scope from the query.
+    related = [];
+  }
+  for (const relation of related) {
+    if (!relation?.kind || !relation?.key) continue;
+    const key = scopeRelation(relation.kind, relation.key);
+    if (!keys.has(key)) keys.set(key, relation.relationship ?? 'related');
+  }
+  return keys;
 }
 
 function scopeRelation(scopeKind, scopeKey) {
@@ -236,7 +263,14 @@ function verifiedSnapshot(root, registryEntry, profile, options, now) {
       !validReferences(snapshot.canonicalRefs)) {
     throw new Error('Accepted snapshot verification failed.');
   }
-  if (!snapshot.relationKeys.includes(scopeRelation(options.scopeKind, options.scopeKey))) {
+  // Fail-closed: the snapshot must still carry a relation the query accepts. The accepted
+  // set is the primary scope plus relations derived from trusted ledger files, so this
+  // broadens what is in scope without weakening the gate itself.
+  const acceptedRelations = options.scopeRelations ?? null;
+  const relationMatches = acceptedRelations
+    ? snapshot.relationKeys.some((relationKey) => acceptedRelations.has(relationKey))
+    : snapshot.relationKeys.includes(scopeRelation(options.scopeKind, options.scopeKey));
+  if (!relationMatches) {
     throw new Error('Accepted snapshot relations do not match the query scope.');
   }
   const claimReadLimit = Math.min(Math.max(profile.maxClaims * 4, profile.maxClaims), 100);
@@ -265,16 +299,24 @@ function relevance(claim, snapshot, profile, queryTerms, options) {
   if (!profile.claimTypes.includes(claim.claimType)) return -1;
   if (!profile.crossProvider && !claim.providers.includes(options.provider)) return -1;
   if (!claim.providers.includes(options.provider) && claim.sensitivity !== 'shared') return -1;
-  const requiredRelation = options.scopeKind && options.scopeKey
-    ? scopeRelation(options.scopeKind, options.scopeKey)
-    : null;
-  if (requiredRelation && !snapshot.relationKeys.includes(requiredRelation)) return -1;
+  const scopeRelations = options.scopeRelations ?? null;
+  if (scopeRelations) {
+    if (!snapshot.relationKeys.some((relationKey) => scopeRelations.has(relationKey))) return -1;
+  } else if (options.scopeKind && options.scopeKey) {
+    if (!snapshot.relationKeys.includes(scopeRelation(options.scopeKind, options.scopeKey))) return -1;
+  }
 
   const haystack = claimHaystack(claim, snapshot);
   const profileMatches = profile.keywords.filter((term) => haystack.includes(term)).length;
   const queryMatches = queryTerms.filter((term) => haystack.includes(term)).length;
   const exactScope = options.scopeKey && snapshot.scope?.key === options.scopeKey ? 4 : 2;
-  if (queryTerms.length > 0 && queryMatches === 0) return -1;
+  // Terms that match nothing must not silently empty the result for the narrow scope
+  // the agent is actually working. This floor is deliberately limited to ticket and
+  // merge-request scopes, mirroring progressScore: a project or workstream scope is
+  // broad enough that term filtering is what keeps the result usable, and related
+  // scopes still require a term match so a parent ticket cannot flood the query.
+  const narrowScope = ['ticket', 'merge-request'].includes(options.scopeKind);
+  if (queryTerms.length > 0 && queryMatches === 0 && !(narrowScope && exactScope >= 4)) return -1;
   if (queryTerms.length === 0 && profileMatches === 0 && exactScope === 0) return -1;
   return (queryMatches * 8) + (profileMatches * 2) + exactScope +
     (claim.providers.includes(options.provider) ? 0 : 1);
@@ -507,21 +549,24 @@ async function buildContextQuery(inputOptions = {}) {
     throw new Error('Accepted snapshot registry is invalid.');
   }
 
-  const requiredRelation = scopeRelation(options.scopeKind, options.scopeKey);
+  const scopeRelations = acceptedScopeRelations(options);
+  const scopedOptions = { ...options, scopeRelations };
+  if (scopeRelations.size > 1) base.warnings.push('scope-relations-expanded');
   const entries = registry.snapshots
     .filter((entry) => entry?.state === 'clean')
-    .filter((entry) => Array.isArray(entry.relationKeys) && entry.relationKeys.includes(requiredRelation))
+    .filter((entry) => Array.isArray(entry.relationKeys) &&
+      entry.relationKeys.some((relationKey) => scopeRelations.has(relationKey)))
     .sort((left, right) => Number(right.version ?? 0) - Number(left.version ?? 0));
   const selectedEntries = entries.slice(0, route.profile.maxSnapshots);
   if (entries.length > selectedEntries.length) base.warnings.push('accepted-snapshot-limit-reached');
   let claimReadLimitReached = false;
   const candidates = selectedEntries.flatMap((entry) => {
-    const snapshot = verifiedSnapshot(root, entry, route.profile, options, now);
+    const snapshot = verifiedSnapshot(root, entry, route.profile, scopedOptions, now);
     claimReadLimitReached ||= snapshot.omittedClaimReadCount > 0;
     return snapshot.claims.map((claim) => ({
       claim,
       snapshot,
-      score: relevance(claim, snapshot, route.profile, terms, options)
+      score: relevance(claim, snapshot, route.profile, terms, scopedOptions)
     }));
   });
   const staleCandidates = candidates.filter((item) =>

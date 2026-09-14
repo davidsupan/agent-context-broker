@@ -165,7 +165,7 @@
             <li><strong>Inventory or propose</strong><span>An adapter inventories bounded metadata or submits a structured proposal.</span></li>
             <li><strong>Validate</strong><span>The core checks paths, schemas, source attestation, content safety, freshness, and expected state.</span></li>
             <li><strong>Reconcile</strong><span>A claim becomes accepted context, stays pending, or is rejected with a reason.</span></li>
-            <li><strong>Route</strong><span>A query returns the smallest matching accepted context and labels peer progress separately.</span></li>
+            <li><strong>Route</strong><span>A query returns the smallest matching accepted context and labels peer progress separately. Scope resolves as a small graph, so a claim on a parent ticket is visible while working its child.</span></li>
             <li><strong>Audit</strong><span>Metadata-only records capture hashes, counts, and dispositions without conversation content.</span></li>
           </ol>
           <p class="rule-note"><strong>Availability fails open.</strong> An unavailable broker does not block the agent. <strong>Integrity fails closed.</strong> Invalid data is never imported or promoted.</p>
