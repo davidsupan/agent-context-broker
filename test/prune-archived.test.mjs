@@ -217,6 +217,36 @@ describe('a file the archive cannot restore is never pruned', () => {
     assert.match(restored.stdout, /restored {6}: 3 \/ 4/);
   });
 
+  test('keeps the ledger outside the quarantine when asked, and restores from there', () => {
+    const source = corpus(testRoot('source-extledger'));
+    const target = testRoot('target-extledger');
+    const quarantine = testRoot('quarantine-extledger');
+    const ledger = join(testRoot('ledger-home'), 'nested', 'prune-ledger.jsonl');
+    assert.equal(archive(source, target).status, 0);
+
+    const before = [0, 1, 2, 3].map((index) => readFileSync(original(source, index)));
+    assert.equal(prune(source, target, quarantine,
+      ['--ledger', ledger, '--keep-days', '7', '--execute']).status, 0);
+
+    // The record of what was removed must not live inside the directory whose deletion it
+    // documents.
+    assert.equal(existsSync(ledger), true);
+    assert.equal(existsSync(join(quarantine, 'prune-ledger.jsonl')), false);
+
+    // A second run must still see them as already pruned, or it would move nothing twice
+    // but report them as fresh candidates.
+    const second = prune(source, target, quarantine, ['--ledger', ledger, '--keep-days', '7']);
+    assert.match(second.stdout, /already pruned {4}: 4/);
+
+    const restored = prune(source, target, quarantine,
+      ['--ledger', ledger, '--restore', '--execute']);
+    assert.equal(restored.status, 0, restored.stderr);
+    assert.match(restored.stdout, /restored {6}: 4 \/ 4/);
+    for (let index = 0; index < 4; index += 1) {
+      assert.equal(Buffer.compare(readFileSync(original(source, index)), before[index]), 0);
+    }
+  });
+
   test('the ledger records the hash each file had when it was moved', () => {
     const source = corpus(testRoot('source-ledger'));
     const target = testRoot('target-ledger');

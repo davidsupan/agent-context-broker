@@ -42,6 +42,7 @@ function parseArgs(argv) {
       case '--source': options.source = value; index += 1; break;
       case '--archive': options.archive = value; index += 1; break;
       case '--quarantine': options.quarantine = value; index += 1; break;
+      case '--ledger': options.ledger = value; index += 1; break;
       case '--keep-days': options.keepDays = Number(value); index += 1; break;
       case '--limit': options.limit = Number(value); index += 1; break;
       default: throw new Error('unknown argument: ' + argument);
@@ -49,7 +50,7 @@ function parseArgs(argv) {
   }
   if (!options.source || !options.archive || !options.quarantine) {
     throw new Error('usage: prune-archived-corpus.mjs --source <dir> --archive <dir> ' +
-      '--quarantine <dir> [--keep-days 14] [--limit n] [--execute] [--restore]');
+      '--quarantine <dir> [--ledger <path>] [--keep-days 14] [--limit n] [--execute] [--restore]');
   }
   return options;
 }
@@ -85,7 +86,13 @@ const options = parseArgs(process.argv.slice(2));
 const source = resolve(options.source);
 const archive = resolve(options.archive);
 const quarantine = resolve(options.quarantine);
-const ledgerPath = join(quarantine, 'prune-ledger.jsonl');
+// The ledger defaults to living inside the quarantine, which is convenient and also the
+// one place it should not be if the quarantine is ever deleted: that deletion would take
+// the record of what was removed with it. --ledger keeps it somewhere that outlives the
+// files it describes, and restore reads it from there.
+const ledgerPath = options.ledger
+  ? resolve(options.ledger)
+  : join(quarantine, 'prune-ledger.jsonl');
 
 if (options.restore) {
   const entries = ledgerEntries(ledgerPath);
@@ -241,6 +248,7 @@ for (const item of ready) {
   }
   mkdirSync(dirname(target), { recursive: true });
   renameSync(item.path, target);
+  mkdirSync(dirname(ledgerPath), { recursive: true });
   writeFileSync(ledgerPath, JSON.stringify({
     schemaVersion: 1,
     relativePath: item.entry.relativePath,
