@@ -371,6 +371,70 @@ export function verifyEventTail(inputOptions = {}) {
   throw error;
 }
 
+// Idempotency used to be answered by scanning every event, which made appending
+// O(store size) and building a store quadratic. The index answers the same question
+// from one sequential file. It is a derived cache, never a source of truth: it is
+// rebuilt from the records whenever it is missing or inconsistent with the tip, so a
+// deleted or stale index costs time, never correctness.
+function indexPath(runtimeRoot) {
+  return join(resolve(runtimeRoot), 'events', 'idempotency.jsonl');
+}
+
+function rebuildIdempotencyIndex(runtimeRoot) {
+  const index = new Map();
+  const lines = [];
+  for (const path of recordFiles(runtimeRoot)) {
+    const event = JSON.parse(readFileSync(path, 'utf8'));
+    index.set(event.idempotencyKey, event.sequence);
+    lines.push(stableJson({ idempotencyKey: event.idempotencyKey, sequence: event.sequence }));
+  }
+  atomicWrite(indexPath(runtimeRoot), lines.length > 0 ? lines.join('\n') + '\n' : '');
+  return index;
+}
+
+function readIdempotencyIndex(runtimeRoot, expectedSequence) {
+  const path = indexPath(runtimeRoot);
+  if (!existsSync(path)) return rebuildIdempotencyIndex(runtimeRoot);
+  const index = new Map();
+  let highest = 0;
+  try {
+    for (const line of readFileSync(path, 'utf8').split('\n')) {
+      if (!line) continue;
+      const entry = JSON.parse(line);
+      if (!HASH.test(entry.idempotencyKey ?? '') || !Number.isSafeInteger(entry.sequence)) {
+        return rebuildIdempotencyIndex(runtimeRoot);
+      }
+      index.set(entry.idempotencyKey, entry.sequence);
+      if (entry.sequence > highest) highest = entry.sequence;
+    }
+  } catch {
+    return rebuildIdempotencyIndex(runtimeRoot);
+  }
+  // The index must describe exactly the committed tip, or it is not trustworthy.
+  if (highest !== expectedSequence) return rebuildIdempotencyIndex(runtimeRoot);
+  return index;
+}
+
+function appendIdempotencyEntries(runtimeRoot, entries) {
+  if (entries.length === 0) return;
+  const path = indexPath(runtimeRoot);
+  const payload = entries
+    .map((entry) => stableJson({ idempotencyKey: entry.idempotencyKey, sequence: entry.sequence }))
+    .join('\n') + '\n';
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, payload, { encoding: 'utf8', flag: 'a' });
+}
+
+// Verifying the whole chain before every write is what made appends quadratic. The
+// tip check proves the store's newest record is internally valid and is exactly what
+// head.json commits to, which is what an append actually depends on. It does not
+// re-prove the prefix; that is what verifyEventStore and event-verify are for, and
+// repair still walks the full chain.
+function verifyEventTip(runtimeRoot) {
+  const tail = verifyEventTail({ runtimeRoot, count: 1 });
+  return { head: tail.head, tip: tail.events.at(-1) ?? null };
+}
+
 export function planBrokerEvent(inputOptions = {}) {
   validateEventInput(inputOptions.event);
   return {
@@ -383,53 +447,124 @@ export function planBrokerEvent(inputOptions = {}) {
   };
 }
 
+function buildEvent(input, sequence, previousEventHash, recordedAt) {
+  const core = {
+    schemaVersion: 1,
+    idempotencyKey: input.idempotencyKey,
+    sequence,
+    eventType: input.eventType,
+    occurredAt: new Date(input.occurredAt).toISOString(),
+    recordedAt,
+    provider: input.provider,
+    scope: input.scope,
+    taskKeyHash: input.taskKeyHash,
+    threadKey: input.threadKey,
+    sourceRefs: [...input.sourceRefs].sort(),
+    subjectRef: input.subjectRef,
+    replacesRef: input.replacesRef,
+    evidenceRefs: [...input.evidenceRefs].sort(),
+    confidence: input.confidence,
+    freshness: input.freshness,
+    sensitivity: input.sensitivity,
+    redactionResult: input.redactionResult,
+    approvalState: input.approvalState,
+    payload: stableValue(input.payload),
+    payloadHash: sha256(stableJson(input.payload)),
+    previousEventHash
+  };
+  return { ...core, eventId: sha256(stableJson(core)) };
+}
+
+function writeEventRecord(root, event) {
+  const name = `${String(event.sequence).padStart(12, '0')}-${event.eventId}.json`;
+  writeJson(join(recordsRoot(root), name), event);
+}
+
+function readEventBySequence(root, sequence) {
+  const prefix = String(sequence).padStart(12, '0');
+  const match = recordFiles(root).find((path) => basename(path).startsWith(`${prefix}-`));
+  return match ? JSON.parse(readFileSync(match, 'utf8')) : null;
+}
+
 export async function appendBrokerEvent(inputOptions = {}) {
+  const [result] = await appendBrokerEvents({
+    ...inputOptions,
+    events: [inputOptions.event]
+  });
+  return result;
+}
+
+// Appending used to verify the entire chain per event, which made a backfill of N
+// events cost O(N^2): at a store of 800 events one append already cost 329 ms.
+// A batch verifies the tip once, links the whole batch, and publishes one head, so
+// ingesting history becomes linear in the number of events rather than quadratic.
+export async function appendBrokerEvents(inputOptions = {}) {
   const options = { ...DEFAULTS, ...inputOptions };
   if (options.execute !== true || !options.runtimeRoot) {
     throw new Error('Broker event append requires execute: true and runtimeRoot.');
   }
-  validateEventInput(options.event);
+  const inputs = Array.isArray(options.events) ? options.events : [];
+  if (inputs.length === 0) throw new Error('Broker event append requires at least one event.');
+  for (const input of inputs) validateEventInput(input);
+
+  const seen = new Set();
+  for (const input of inputs) {
+    if (seen.has(input.idempotencyKey)) {
+      throw new Error('Broker event batch repeats an idempotency key.');
+    }
+    seen.add(input.idempotencyKey);
+  }
+
   const root = resolve(options.runtimeRoot);
   return withLock(join(root, 'events', 'event-store.lock'), options, async () => {
-    const verified = verifyEventStore({ runtimeRoot: root });
-    const duplicate = verified.events.find((event) =>
-      event.idempotencyKey === options.event.idempotencyKey
-    );
-    if (duplicate) return { ...duplicate, idempotentReplay: true };
+    const { head } = verifyEventTip(root);
+    const index = readIdempotencyIndex(root, head.sequence);
 
     const recordedAt = options.now
       ? new Date(options.now).toISOString()
       : new Date().toISOString();
-    const sequence = verified.head.sequence + 1;
-    const core = {
-      schemaVersion: 1,
-      idempotencyKey: options.event.idempotencyKey,
-      sequence,
-      eventType: options.event.eventType,
-      occurredAt: new Date(options.event.occurredAt).toISOString(),
-      recordedAt,
-      provider: options.event.provider,
-      scope: options.event.scope,
-      taskKeyHash: options.event.taskKeyHash,
-      threadKey: options.event.threadKey,
-      sourceRefs: [...options.event.sourceRefs].sort(),
-      subjectRef: options.event.subjectRef,
-      replacesRef: options.event.replacesRef,
-      evidenceRefs: [...options.event.evidenceRefs].sort(),
-      confidence: options.event.confidence,
-      freshness: options.event.freshness,
-      sensitivity: options.event.sensitivity,
-      redactionResult: options.event.redactionResult,
-      approvalState: options.event.approvalState,
-      payload: stableValue(options.event.payload),
-      payloadHash: sha256(stableJson(options.event.payload)),
-      previousEventHash: verified.head.eventId
-    };
-    const event = { ...core, eventId: sha256(stableJson(core)) };
-    const path = join(recordsRoot(root), `${String(sequence).padStart(12, '0')}-${event.eventId}.json`);
-    writeJson(path, event);
-    writeJson(join(root, 'events', 'head.json'), expectedHead([...verified.events, event]));
-    return { ...event, idempotentReplay: false };
+
+    const results = [];
+    const appended = [];
+    let sequence = head.sequence;
+    let previousEventHash = head.eventId;
+
+    for (const input of inputs) {
+      const existing = index.get(input.idempotencyKey);
+      if (existing !== undefined) {
+        const duplicate = readEventBySequence(root, existing);
+        if (duplicate) {
+          results.push({ ...duplicate, idempotentReplay: true });
+          continue;
+        }
+        // The index named a record that is not there; the index is a cache, so
+        // rebuild rather than trusting it, and fail closed if it still disagrees.
+        const rebuilt = rebuildIdempotencyIndex(root);
+        const recovered = rebuilt.get(input.idempotencyKey);
+        if (recovered !== undefined) {
+          const event = readEventBySequence(root, recovered);
+          if (event) {
+            results.push({ ...event, idempotentReplay: true });
+            continue;
+          }
+          throw new Error('Broker event idempotency index is inconsistent.');
+        }
+      }
+      sequence += 1;
+      const event = buildEvent(input, sequence, previousEventHash, recordedAt);
+      writeEventRecord(root, event);
+      appended.push(event);
+      previousEventHash = event.eventId;
+      results.push({ ...event, idempotentReplay: false });
+    }
+
+    if (appended.length > 0) {
+      // One head publication for the whole batch: the head only ever describes the
+      // newest event, so a batch and a sequence of single appends commit the same tip.
+      writeJson(join(root, 'events', 'head.json'), expectedHead(appended));
+      appendIdempotencyEntries(root, appended);
+    }
+    return results;
   });
 }
 
@@ -455,6 +590,9 @@ export async function repairEventHead(inputOptions = {}) {
       }
       const head = expectedHead(events);
       if (events.length > 0) writeJson(headPath, head);
+      // Repair is the operation that makes the store self-consistent, so the derived
+      // idempotency index is rebuilt here rather than left to drift.
+      rebuildIdempotencyIndex(root);
       return { repaired: true, head, eventCount: events.length };
     } catch (error) {
       if (existing !== null) atomicWrite(headPath, existing);
