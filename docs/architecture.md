@@ -90,6 +90,45 @@ substrate: one file per event, and an index read in full per batch. Segmenting t
 log so that sealed segments are verified by manifest rather than by record is the
 next step, and is not implemented.
 
+## Corpus archiving
+
+Provider transcripts are the raw material ingestion reads from, and they grow far
+faster than the broker does: on the machine this was built against, 933 Codex
+rollouts hold 12.3 GB and 415 Claude Code sessions another 0.15 GB. Archiving them
+is not a broker function, but leaving them unmanaged is how history gets deleted by
+whoever runs out of disk first.
+
+`scripts/archive-corpus.mjs` compresses a corpus with zstd and never modifies or
+removes an original. Three properties matter:
+
+- **Per-file proof, not per-run assumption.** Each entry records the original
+  SHA-256, the packed SHA-256, and the SHA-256 of the decompressed bytes, and is
+  marked verified only when the decompressed hash equals the original. "Safe to
+  prune" is therefore a measurement about one file.
+- **Bounded memory.** Everything streams. An earlier buffered version peaked at
+  4.4 GB on a corpus whose largest rollouts approach 1 GB; the streaming version
+  peaks at 0.06 GB regardless of file size, which matters on a machine shared with
+  other agents.
+- **Settled files only.** Codex rewrites rollouts in place, so files touched inside
+  `--min-age-hours` are skipped rather than archived and then treated as prunable.
+
+`scripts/verify-archive.mjs` re-checks an archive against what is on disk now
+rather than trusting the manifest's own verdict: it confirms every entry is present
+and hashes to its recorded packed digest, decompresses a deterministic sample (or
+all of it with `--full`), and with `--source` reports originals that changed after
+archiving, which are the ones that are *not* safe to prune.
+
+Entries record the codec that wrote them. The Bun-native API and the node:zlib
+streams both emit valid zstd and each reads the other's output, but they do not emit
+identical bytes, so verification is by recorded hash rather than by re-compressing
+and comparing. A mixed-codec archive is fully verifiable; it simply is not
+bit-reproducible from its source.
+
+Measured on the Codex corpus at level 9: 3.95x overall (12.32 GB to 3.12 GB),
+per-file 1.74x to 23.64x with a 3.92x median. Level 19 reaches about 4.12x but costs
+roughly 50x the compression time, which is hours instead of minutes across the whole
+corpus for about 11% more compression.
+
 ## Trust boundaries
 
 Provider histories remain private source material. Accepted claims are not
