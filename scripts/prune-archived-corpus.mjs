@@ -202,7 +202,11 @@ for (const candidate of selected) {
   }
   verified += 1;
   bytes += candidate.entry.originalBytes;
-  ready.push({ ...candidate, sha256: live });
+  // Remember what the file looked like when it was verified, so the move can refuse if it
+  // changed in between. Codex rewrites rollouts in place and this loop can run for
+  // minutes across a large corpus.
+  const stamp = statSync(candidate.path);
+  ready.push({ ...candidate, sha256: live, verifiedSize: stamp.size, verifiedMtimeMs: stamp.mtimeMs });
 }
 
 console.log('re-verified   : ' + verified + ' / ' + selected.length);
@@ -219,11 +223,20 @@ if (!options.execute) {
 mkdirSync(quarantine, { recursive: true });
 let moved = 0;
 let blocked = 0;
+let raced = 0;
 for (const item of ready) {
   const target = join(quarantine, item.entry.relativePath);
   if (existsSync(target)) {
     blocked += 1;
     console.error('  QUARANTINE PATH OCCUPIED: ' + item.entry.relativePath);
+    continue;
+  }
+  // Re-check immediately before the move. Verification happened earlier in the run, and a
+  // file rewritten since then is no longer the one the archive holds.
+  const now = existsSync(item.path) ? statSync(item.path) : null;
+  if (!now || now.size !== item.verifiedSize || now.mtimeMs !== item.verifiedMtimeMs) {
+    raced += 1;
+    console.error('  CHANGED SINCE VERIFICATION, NOT MOVED: ' + item.entry.relativePath);
     continue;
   }
   mkdirSync(dirname(target), { recursive: true });
@@ -243,9 +256,10 @@ for (const item of ready) {
 
 console.log('moved         : ' + moved + ' file(s) into quarantine');
 if (blocked) console.log('blocked       : ' + blocked);
+if (raced) console.log('changed late  : ' + raced + ' (rewritten after verification, left in place)');
 console.log('ledger        : ' + ledgerPath);
 console.log('');
 console.log('These files are still on disk, so no space has been reclaimed yet. Restore');
 console.log('them with --restore, or reclaim the space by deleting the quarantine');
 console.log('directory once you are satisfied - that deletion is the irreversible step.');
-process.exit(blocked === 0 ? 0 : 1);
+process.exit(blocked === 0 && raced === 0 ? 0 : 1);

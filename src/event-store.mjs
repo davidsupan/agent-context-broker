@@ -397,6 +397,7 @@ function readIdempotencyIndex(runtimeRoot, expectedSequence) {
   if (!existsSync(path)) return rebuildIdempotencyIndex(runtimeRoot);
   const index = new Map();
   let highest = 0;
+  let entries = 0;
   try {
     for (const line of readFileSync(path, 'utf8').split('\n')) {
       if (!line) continue;
@@ -405,13 +406,21 @@ function readIdempotencyIndex(runtimeRoot, expectedSequence) {
         return rebuildIdempotencyIndex(runtimeRoot);
       }
       index.set(entry.idempotencyKey, entry.sequence);
+      entries += 1;
       if (entry.sequence > highest) highest = entry.sequence;
     }
   } catch {
     return rebuildIdempotencyIndex(runtimeRoot);
   }
   // The index must describe exactly the committed tip, or it is not trustworthy.
-  if (highest !== expectedSequence) return rebuildIdempotencyIndex(runtimeRoot);
+  //
+  // Reaching the tip is not enough on its own: the rebuild writes one line per record, so
+  // an index that lost lines in the middle but kept the last one still matched here, and a
+  // replayed event whose key sat in the hole was appended a second time. Counting the
+  // lines closes that, since an intact index has exactly one per committed sequence.
+  if (highest !== expectedSequence || entries !== expectedSequence) {
+    return rebuildIdempotencyIndex(runtimeRoot);
+  }
   return index;
 }
 

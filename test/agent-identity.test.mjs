@@ -210,6 +210,36 @@ describe('agent identity is descriptive and never authorization', () => {
     }), /not allowed/u);
   });
 
+  test('an observation dated after the write is refused', async () => {
+    const runtimeRoot = root('future-runtime');
+    const eventRuntimeRoot = root('future-events');
+    const token = await source(eventRuntimeRoot, 'codex', 'future');
+
+    // This is the defect that put one bad event into the live store: a hand-authored
+    // proposal dated ahead of the run, which inverts valid and transaction time.
+    await assert.rejects(() => publishPeerProgress({
+      runtimeRoot, eventRuntimeRoot, provider: 'codex', execute: true,
+      now: '2026-08-26T08:05:00.000Z',
+      proposal: proposal(token, 'APP-50006', 'Dated ahead', {
+        observedAt: '2026-08-26T09:05:00.000Z'
+      })
+    }), /observation time is in the future/u);
+
+    // Rounding a minute forward is ordinary and must still publish.
+    await publishPeerProgress({
+      runtimeRoot, eventRuntimeRoot, provider: 'codex', execute: true,
+      now: '2026-08-26T08:04:30.000Z',
+      proposal: proposal(token, 'APP-50007', 'Rounded to the minute', {
+        observedAt: '2026-08-26T08:05:00.000Z'
+      })
+    });
+    const progress = readPeerProgress({
+      runtimeRoot, eventRuntimeRoot, provider: 'codex',
+      scopeKind: 'ticket', scopeKey: 'APP-50007', now: '2026-08-26T08:10:00.000Z'
+    });
+    assert.equal(progress.progress.length, 1);
+  });
+
   test('the same work from two agents stays one actor, so supersede still works', async () => {
     const runtimeRoot = root('actor-runtime');
     const eventRuntimeRoot = root('actor-events');

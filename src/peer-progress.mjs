@@ -44,6 +44,9 @@ const STAGES = new Set(['research', 'implementation', 'validation', 'review', 'c
 const PIPELINE_STATES = new Set([
   'unknown', 'created', 'pending', 'running', 'passed', 'failed', 'canceled', 'skipped', 'manual'
 ]);
+// Enough for clock skew between local agents and for a summary rounded up to the minute,
+// which is what the honest near-misses in the existing history look like.
+const FUTURE_OBSERVATION_TOLERANCE_MS = 300000;
 const PROPOSAL_FIELDS = new Set([
   'schemaVersion', 'proposalId', 'sourceToken', 'scope', 'work', 'state', 'stage',
   'summary', 'nextSteps', 'limitations', 'changedSurfaces', 'canonicalRefs',
@@ -229,6 +232,16 @@ function normalizedProposal(inputOptions) {
   }
   const observedAt = new Date(proposal.observedAt);
   if (Number.isNaN(observedAt.getTime())) throw new Error('Peer progress observation time is invalid.');
+  // An observation cannot postdate the write that records it. Nothing enforced this, and a
+  // hand-authored proposal dated ahead produced an event whose valid time preceded nothing
+  // and broke the bi-temporal ordering the ingest audit reports on. The tolerance absorbs
+  // ordinary clock skew and rounding to the minute; it is not a licence to date work in
+  // the future, and the TTL is measured from observedAt either way.
+  const skewMs = (inputOptions.now ? new Date(inputOptions.now) : new Date()).getTime() +
+    FUTURE_OBSERVATION_TOLERANCE_MS;
+  if (observedAt.getTime() > skewMs) {
+    throw new Error('Peer progress observation time is in the future.');
+  }
   const ttlSeconds = proposal.ttlSeconds ?? (proposal.state === 'completed' ? 604800 : 3600);
   if (!Number.isSafeInteger(ttlSeconds) || ttlSeconds < 60 || ttlSeconds > 2592000) {
     throw new Error('Peer progress TTL is invalid.');

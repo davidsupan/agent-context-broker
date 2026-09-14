@@ -22,6 +22,9 @@ const byType = new Map();
 const suspects = [];
 let occurredBeforeRecorded = 0;
 let occurredEqualsRecorded = 0;
+// Named, not just counted. A bare count invites "those are all old ones" as an unchecked
+// assertion; listing the sequences lets a reviewer confirm or refute it in one look.
+const inverted = [];
 let earliestOccurred = null;
 let latestOccurred = null;
 let earliestRecorded = null;
@@ -53,6 +56,14 @@ for (const name of files) {
   const recorded = Date.parse(event.recordedAt);
   if (occurred < recorded) occurredBeforeRecorded += 1;
   if (occurred === recorded) occurredEqualsRecorded += 1;
+  if (occurred > recorded) {
+    inverted.push({
+      sequence: event.sequence,
+      eventType: event.eventType,
+      occurredAt: event.occurredAt,
+      recordedAt: event.recordedAt
+    });
+  }
   if (earliestOccurred === null || occurred < earliestOccurred) earliestOccurred = occurred;
   if (latestOccurred === null || occurred > latestOccurred) latestOccurred = occurred;
   if (earliestRecorded === null || recorded < earliestRecorded) earliestRecorded = recorded;
@@ -70,6 +81,12 @@ console.log('valid time  (occurredAt) spans : ' +
 console.log('transaction (recordedAt) from  : ' + new Date(earliestRecorded).toISOString());
 console.log('occurredAt < recordedAt        : ' + occurredBeforeRecorded + ' / ' + files.length);
 console.log('occurredAt == recordedAt       : ' + occurredEqualsRecorded + ' / ' + files.length);
+console.log('occurredAt >  recordedAt       : ' + inverted.length + ' / ' + files.length +
+  (inverted.length > 0 ? '  (an actor dated its own observation ahead of the write)' : ''));
+for (const item of inverted.sort((left, right) => left.sequence - right.sequence)) {
+  console.log('  seq ' + String(item.sequence).padStart(6) + '  ' + item.eventType +
+    '  ' + item.occurredAt + ' > ' + item.recordedAt);
+}
 console.log('');
 if (suspects.length === 0) {
   console.log('payload prose audit            : clean (no long non-hash strings in any payload)');

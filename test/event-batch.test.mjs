@@ -141,6 +141,25 @@ describe('batched event ingestion', () => {
     assert.ok(existsSync(indexPath(runtimeRoot)));
   });
 
+  test('an index missing entries behind an intact tip is rebuilt, not trusted', async () => {
+    const runtimeRoot = root('holed-index');
+    const inputs = Array.from({ length: 3 }, () => candidate());
+    await appendBrokerEvents({ runtimeRoot, events: inputs, execute: true });
+
+    // Drop a middle line but keep the last one, so the index still reaches the committed
+    // tip while no longer describing every event. Checking only the tip accepted this and
+    // appended a duplicate for the key that fell in the hole.
+    const lines = readFileSync(indexPath(runtimeRoot), 'utf8').split('\n').filter(Boolean);
+    assert.equal(lines.length, 3);
+    writeFileSync(indexPath(runtimeRoot), [lines[0], lines[2]].join('\n') + '\n', 'utf8');
+
+    const replay = await appendBrokerEvents({ runtimeRoot, events: inputs, execute: true });
+
+    assert.deepEqual(replay.map((event) => event.idempotentReplay), [true, true, true]);
+    assert.equal(recordCount(runtimeRoot), 3,
+      'a replayed event must not be appended twice because the index lost its entry');
+  });
+
   test('a stale index is rebuilt rather than trusted', async () => {
     const runtimeRoot = root('stale-index');
     const inputs = Array.from({ length: 3 }, () => candidate());

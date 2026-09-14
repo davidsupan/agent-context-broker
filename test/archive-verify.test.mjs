@@ -177,5 +177,9 @@ describe('the verifier fails when the archive is not actually intact', () => {
     const verify = run('verify-archive.mjs', ['--archive', target, '--source', source, '--full']);
     assert.match(verify.stdout + verify.stderr, /SOURCE CHANGED SINCE ARCHIVE/);
     assert.match(verify.stdout, /NOT safe to prune/);
+    // The exit code has to fail too. This command is used to decide whether originals can
+    // be deleted, so a caller scripting it must not see success while drift is reported.
+    assert.equal(verify.status, 1);
+    assert.match(verify.stdout, /archive NOT verified/);
   });
 });

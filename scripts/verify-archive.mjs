@@ -164,7 +164,11 @@ if (options.source) {
     (sourceDrift ? ' - drifted files are NOT safe to prune from this archive' : ''));
 }
 
-const failures = missing + sizeMismatch + packedMismatch + restoreFailed;
+// Source drift counts as a failure. This command exists to answer "is it safe to delete
+// the originals", and a drifted original is precisely the case where the answer is no, so
+// reporting it while exiting 0 turns the exit code into a trap for anyone scripting the
+// check.
+const failures = missing + sizeMismatch + packedMismatch + restoreFailed + sourceDrift;
 console.log('');
 if (failures === 0) {
   console.log('archive verified: every checked entry is intact and restores to its original hash');

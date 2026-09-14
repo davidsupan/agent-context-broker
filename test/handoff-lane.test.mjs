@@ -55,10 +55,15 @@ function batch(claims) {
   };
 }
 
-function dispositionFor(result, claimKey) {
-  const entry = (result.claims ?? result.dispositions ?? [])
-    .find((item) => item.claimKey === claimKey);
-  return entry?.disposition ?? entry?.state ?? null;
+// Reconciliation reports a batch verdict, not a per-claim disposition list. An earlier
+// version of this helper looked for a claims array that does not exist, so it always
+// returned null and every assertion built on it passed regardless of behaviour.
+function acceptedCount(result) {
+  return result.acceptedClaimCount;
+}
+
+function issueReasons(result) {
+  return (result.issues ?? []).map((issue) => issue.reason ?? issue.code ?? JSON.stringify(issue));
 }
 
 afterEach(() => {
@@ -80,7 +85,8 @@ describe('the model-assisted lane cannot reach accepted context on its own', () 
     // and the reason must be an evidence review rather than a silent drop.
     assert.ok(serialised.includes('evidence-review'),
       'expected an evidence-review issue for an agent-handoff claim');
-    assert.notEqual(dispositionFor(result, 'decision.retry-policy'), 'accepted');
+    assert.equal(acceptedCount(result), 0,
+      'an agent-handoff claim must not be counted as accepted');
   });
 
   test('marking a handoff claim verified does not buy it acceptance', async () => {
@@ -95,7 +101,7 @@ describe('the model-assisted lane cannot reach accepted context on its own', () 
     // The gate keys on evidence class, so an extractor cannot promote its own output
     // by asserting that it verified itself.
     assert.ok(JSON.stringify(result).includes('evidence-review'));
-    assert.notEqual(dispositionFor(result, 'decision.retry-policy'), 'accepted');
+    assert.equal(acceptedCount(result), 0);
   });
 
   test('an unverified tool result is also held, so only real evidence promotes', async () => {
@@ -111,6 +117,7 @@ describe('the model-assisted lane cannot reach accepted context on its own', () 
     });
 
     assert.ok(JSON.stringify(result).includes('evidence-review'));
+    assert.equal(acceptedCount(result), 0);
   });
 
   test('a verified canonical artifact is the path that does promote', async () => {
@@ -129,5 +136,11 @@ describe('the model-assisted lane cannot reach accepted context on its own', () 
     // evidence the broker can check, which is what keeps the extractor out of the
     // trust path.
     assert.ok(!JSON.stringify(result).includes('evidence-review'));
+    // Absence of the review issue is not acceptance. Without this the test would also
+    // pass if the claim were silently dropped, which would make the whole contrast
+    // meaningless.
+    assert.equal(result.state, 'clean');
+    assert.equal(acceptedCount(result), 1);
+    assert.deepEqual(issueReasons(result), []);
   });
 });
