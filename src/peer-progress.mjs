@@ -13,6 +13,7 @@ import {
 import { basename, dirname, join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
+import { normalizeAgentDescriptor } from './agent-identity.mjs';
 import { unsafeContentReason } from './content-safety.mjs';
 import {
   appendBrokerEvent,
@@ -46,13 +47,13 @@ const PIPELINE_STATES = new Set([
 const PROPOSAL_FIELDS = new Set([
   'schemaVersion', 'proposalId', 'sourceToken', 'scope', 'work', 'state', 'stage',
   'summary', 'nextSteps', 'limitations', 'changedSurfaces', 'canonicalRefs',
-  'relatedScopes', 'revision', 'observedAt', 'ttlSeconds'
+  'relatedScopes', 'revision', 'observedAt', 'ttlSeconds', 'agent'
 ]);
 const ARTIFACT_FIELDS = new Set([
   'schemaVersion', 'progressId', 'digest', 'actorKey', 'workKeyHash', 'provider',
   'sourceRef', 'scope', 'work', 'state', 'stage', 'summary', 'nextSteps',
   'limitations', 'changedSurfaces', 'canonicalRefs', 'relatedScopes', 'relationKeys',
-  'revision', 'observedAt', 'expiresAt', 'verification', 'sensitivity'
+  'revision', 'observedAt', 'expiresAt', 'verification', 'sensitivity', 'agent'
 ]);
 const DEFAULTS = Object.freeze({
   lockTimeoutMs: 5000,
@@ -267,7 +268,11 @@ function normalizedProposal(inputOptions) {
     observedAt: observedAt.toISOString(),
     expiresAt: new Date(observedAt.getTime() + (ttlSeconds * 1000)).toISOString(),
     verification: 'unverified',
-    sensitivity: 'shared'
+    sensitivity: 'shared',
+    // Descriptive only. It says which agent published this checkpoint so a reader can tell
+    // two concurrent Codex runs apart; it is self-declared and feeds nothing that decides
+    // acceptance, ranking or scope.
+    agent: normalizeAgentDescriptor(proposal.agent)
   };
   const unsafeReason = unsafeContentReason(normalized);
   if (unsafeReason) throw new Error(`Peer progress contains unsafe content: ${unsafeReason}.`);
@@ -314,6 +319,9 @@ function progressEvent(artifact, source, previousRef) {
       relationCount: artifact.relationKeys.length,
       state: artifact.state,
       stage: artifact.stage,
+      // Enumerated value and a hash, never free text, so ingested payloads stay prose-free.
+      agentKind: artifact.agent?.kind ?? null,
+      agentInstanceHash: artifact.agent?.instanceHash ?? null,
       schema: 'peer-progress-v1'
     }
   };
@@ -602,6 +610,9 @@ export function readPeerProgress(inputOptions = {}) {
       expiresAt: artifact.expiresAt,
       verification: artifact.verification,
       sensitivity: artifact.sensitivity,
+      // Surfaced so a reader can tell concurrent actors apart; it carries no weight in the
+      // relevance score above.
+      agent: artifact.agent ?? null,
       relevance: score
     });
   }

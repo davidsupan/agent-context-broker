@@ -222,6 +222,14 @@ const proposal = {
     recordKey: sha(`${options.provider}-extract:${source}`),
     sourceHash: ordered[0]?.sourceHash ?? sha(`${options.provider}:empty`)
   },
+  // Who produced these candidates. Everything below is agent-authored by construction, and
+  // saying so in the record means a reviewer does not have to infer it from the filename.
+  agent: {
+    kind: 'sdk',
+    harness: 'acb-extractor',
+    model: 'deterministic-markers',
+    instanceId: `extract-handoff-candidates:${options.provider}:${source}`
+  },
   claims: ordered.map((item) => ({
     claimKey: `handoff.${item.key.slice(0, 16)}`,
     claimType: 'decision',

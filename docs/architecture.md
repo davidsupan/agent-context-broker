@@ -164,6 +164,37 @@ Promotion means resubmitting a claim with canonical-artifact or observed-tool-re
 evidence the broker can check. Precision in the extractor therefore buys a shorter review
 queue, never trust.
 
+## Caller identity
+
+The broker already distinguished *actors* — peer progress derives an `actorKey` from
+provider, session and work — but it could not say what an actor is. A read returned
+`provider: "codex"` and an opaque hash, which on a machine running several Codex and
+Claude agents at once is not enough to tell an interactive session from a subagent, or one
+concurrent run from another.
+
+An optional agent descriptor now rides along on peer progress and on context-query audits:
+`kind` (interactive, subagent, scheduled, sdk, unknown), `harness`, `harnessVersion`,
+`model`, and a hash of a caller-supplied instance id. Three rules keep it from becoming
+something it is not:
+
+- **Self-declared, never authorization.** Nothing in the descriptor may raise confidence,
+  change acceptance, widen scope, or outrank another actor. It is stored with
+  `attestation: "self-declared"` so a reader is never tempted to treat it as established.
+  An agent that could promote its own writes by naming itself would be a trust hole.
+- **Non-prose.** Every field is an enumerated value, a short safe token, or a hash, and the
+  raw instance id is hashed on the way in. Free text is rejected, so ingested payloads stay
+  prose-free and the corpus audit keeps meaning what it says.
+- **It does not widen `actorKey`.** Tempting, but wrong: a restarted agent would stop
+  superseding its own progress and the queue would fill with stale duplicates.
+
+The descriptor is optional everywhere. Proposals that omit it publish and verify exactly as
+before, and pre-existing artifacts keep their digests because verification recomputes from
+the stored record rather than rebuilding it.
+
+Accepted-claim provenance is deliberately unchanged. Its field set is fixed and stored
+state depends on it, so carrying agent identity there is a schema migration rather than an
+additive change; the handoff submitter reports the submitting agent instead.
+
 ## Trust boundaries
 
 Provider histories remain private source material. Accepted claims are not

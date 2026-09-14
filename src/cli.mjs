@@ -157,6 +157,11 @@ function parseArgs(argv) {
       case '--ticket-packages-root': options.ticketPackagesRoot = value; break;
       case '--review-ledgers-root': options.reviewLedgersRoot = value; break;
       case '--thread-ref': options.threadRef = value; break;
+      // Agent self-description. Recorded for attribution only; it buys the caller nothing.
+      case '--agent-kind': options.agentKind = value; break;
+      case '--agent-model': options.agentModel = value; break;
+      case '--agent-harness': options.agentHarness = value; break;
+      case '--agent-instance': options.agentInstance = value; break;
       case '--thread-audit-root': options.threadAuditRoot = value; break;
       case '--profile': options.profileId = value; break;
       case '--profiles': options.profilesPath = value; break;
@@ -265,6 +270,17 @@ function parseArgs(argv) {
       (!options.proposalPath || !options.runtimeRoot || !options.eventRuntimeRoot)) {
     throw new Error('--proposal, --runtime-root, and --event-runtime-root are required for publication.');
   }
+  // Build the descriptor only when the caller said something about itself, so nothing is
+  // invented on their behalf.
+  if (options.agentKind || options.agentModel || options.agentHarness || options.agentInstance) {
+    options.agent = {
+      kind: options.agentKind ?? 'unknown',
+      model: options.agentModel ?? null,
+      harness: options.agentHarness ?? null,
+      instanceId: options.agentInstance ?? null
+    };
+  }
+  for (const key of ['agentKind', 'agentModel', 'agentHarness', 'agentInstance']) delete options[key];
   return options;
 }
 
@@ -277,7 +293,10 @@ try {
   let result;
 
   if (command === 'progress-publish') {
-    const proposal = JSON.parse(readFileSync(options.proposalPath, 'utf8'));
+    const file = JSON.parse(readFileSync(options.proposalPath, 'utf8'));
+    // A descriptor in the proposal file wins: the flags are a convenience for callers that
+    // do not author the file themselves.
+    const proposal = options.agent && !file.agent ? { ...file, agent: options.agent } : file;
     result = execute
       ? await publishPeerProgress({ ...options, proposal, execute: true })
       : planPeerProgressPublication({ ...options, proposal });

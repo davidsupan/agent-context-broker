@@ -14,6 +14,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
+import { normalizeAgentDescriptor } from '../src/agent-identity.mjs';
 import { planReconciliation, reconcileClaimBatch } from '../src/reconciliation.mjs';
 
 function parseArgs(argv) {
@@ -91,7 +92,15 @@ const batch = {
   claims
 };
 
+// Reported, not stored on the claim: the accepted-claim provenance contract is a fixed
+// field set that stored state depends on, so widening it is a schema migration rather than
+// an additive change and is deliberately not done here.
+const agent = normalizeAgentDescriptor(input.agent);
 console.log('claims submitted : ' + claims.length);
+console.log('submitting agent : ' + (agent
+  ? `${agent.kind}${agent.harness ? ' / ' + agent.harness : ''}` +
+    `${agent.model ? ' / ' + agent.model : ''} (self-declared)`
+  : 'not declared'));
 console.log('lane             : agent-handoff / unverified (forced)');
 if (overridden.length > 0) {
   console.log('overridden       : ' + overridden.length +

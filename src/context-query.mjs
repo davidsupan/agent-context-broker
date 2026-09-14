@@ -15,6 +15,7 @@ import {
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
+import { normalizeAgentDescriptor } from './agent-identity.mjs';
 import { loadContextProfiles, routeContextProfile } from './context-router.mjs';
 import { readPeerProgress } from './peer-progress.mjs';
 import { relationsForScope, reviewLedgerContext } from './work-ledgers.mjs';
@@ -408,6 +409,10 @@ function queryAudit(result, options, auditId) {
     generatedAt: result.generatedAt,
     mode: 'context-query',
     provider: result.provider,
+    // Which agent read this context. The audit trail previously recorded the provider but
+    // not the reader, so concurrent agents on one machine were indistinguishable after the
+    // fact. Self-declared and descriptive: it never affects what the query returns.
+    agent: normalizeAgentDescriptor(options.agent),
     profile: result.profile,
     strictIsolation: result.strictIsolation,
     routeReason: result.routeReason,
