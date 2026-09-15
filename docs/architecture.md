@@ -191,6 +191,32 @@ The descriptor is optional everywhere. Proposals that omit it publish and verify
 before, and pre-existing artifacts keep their digests because verification recomputes from
 the stored record rather than rebuilding it.
 
+Forward compatibility is the direction that bites. A stored artifact is verified against an
+exact field set, so a deployed tool that predates the field rejects any artifact carrying
+it — including `agent: null`. The key is therefore written only when a descriptor was
+actually declared, so every plain publish stays readable by older readers, and a publish
+that does declare one is only readable once the deployed tool has been upgraded. Checking
+old records under new code proves nothing about this; check new records under the
+**deployed** reader.
+
+## Parallel chains
+
+A verification failure does not always mean the chain is damaged. The costliest outage this
+broker has had was a **second genesis written beside the real chain**: a lifecycle hook ran
+with a view of the store in which no head and no records were visible, appended sequences
+1–4 as a fresh chain, and its writes landed in the real records directory. Two files per
+sequence then failed every full verification for every reader, while the committed chain
+itself was intact the whole time.
+
+Two things now make that impossible to mistake for corruption. `recordFiles` refuses a
+directory holding two records for one sequence and names the sequences as a parallel chain,
+so the repair — move the files the committed head does not reference out of the way — is
+obvious from the message. And `deliverLifecycleOutbox` refuses to seed an empty store once
+this lifecycle has delivered before: a delivered receipt proves the chain existed, so a
+missing head afterwards means the hook is looking at the wrong directory, not at a fresh
+store. The first run after activation still seeds normally, and a deliberate rebuild passes
+`allowGenesis`.
+
 Accepted-claim provenance is deliberately unchanged. Its field set is fixed and stored
 state depends on it, so carrying agent identity there is a schema migration rather than an
 additive change; the handoff submitter reports the submitting agent instead.

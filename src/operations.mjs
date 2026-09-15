@@ -105,7 +105,10 @@ export async function migrateLifecycleLedger(inputOptions = {}) {
     await deliverLifecycleOutbox({
       lifecycleRuntimeRoot: runtimeRoot,
       eventRuntimeRoot: inputOptions.eventRuntimeRoot,
-      atomicWriter: atomicWrite
+      atomicWriter: atomicWrite,
+      // Migration is the deliberate backfill path and may legitimately seed an empty
+      // store; the hook path may not.
+      allowGenesis: true
     });
     migrated.add(loaded.inputHash);
     checkpoint.migratedInputHashes = [...migrated].sort();

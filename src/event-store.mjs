@@ -242,10 +242,27 @@ function recordsRoot(runtimeRoot) {
 function recordFiles(runtimeRoot) {
   const root = recordsRoot(runtimeRoot);
   if (!existsSync(root)) return [];
-  return readdirSync(root, { withFileTypes: true })
+  const paths = readdirSync(root, { withFileTypes: true })
     .filter((entry) => entry.isFile() && /^\d{12}-[a-f0-9]{64}\.json$/u.test(entry.name))
     .map((entry) => join(root, entry.name))
     .sort();
+  // Two files for one sequence means two chains share a directory: a writer that could
+  // not see the committed head started a fresh genesis next to the real one. The generic
+  // chain failure that follows says nothing about why, and cost a long outage to diagnose;
+  // name the condition and the sequences so the repair is obvious and the cause is not
+  // mistaken for corruption of the real chain.
+  const seen = new Map();
+  const duplicated = [];
+  for (const path of paths) {
+    const sequence = basename(path).slice(0, 12);
+    if (seen.has(sequence)) duplicated.push(Number(sequence));
+    seen.set(sequence, path);
+  }
+  if (duplicated.length > 0) {
+    throw new Error('Broker event store holds duplicate sequence records (a parallel chain) at: ' +
+      [...new Set(duplicated)].sort((a, b) => a - b).join(', ') + '.');
+  }
+  return paths;
 }
 
 function headCore(events) {

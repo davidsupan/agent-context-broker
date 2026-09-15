@@ -260,6 +260,7 @@ function normalizedProposal(inputOptions) {
     ? { kind: 'thread', key: source.threadRef }
     : stableValue(proposal.work);
   const relatedScopes = normalizedRelations(proposal, options);
+  const agentDescriptor = normalizeAgentDescriptor(proposal.agent);
   const normalized = {
     schemaVersion: 1,
     actorKey: sha256(`${inputOptions.provider}:${source.sessionKey}:${work.kind}:${work.key}`),
@@ -285,7 +286,13 @@ function normalizedProposal(inputOptions) {
     // Descriptive only. It says which agent published this checkpoint so a reader can tell
     // two concurrent Codex runs apart; it is self-declared and feeds nothing that decides
     // acceptance, ranking or scope.
-    agent: normalizeAgentDescriptor(proposal.agent)
+    //
+    // The key is written only when a descriptor was declared. A stored artifact is
+    // verified with an exact field set, so an `agent: null` key would make every plain
+    // publish unreadable to a deployed tool that predates the field - which is precisely
+    // what took the shared broker down for eighteen hours. Old readers keep working for
+    // every publish that does not use the feature.
+    ...(agentDescriptor ? { agent: agentDescriptor } : {})
   };
   const unsafeReason = unsafeContentReason(normalized);
   if (unsafeReason) throw new Error(`Peer progress contains unsafe content: ${unsafeReason}.`);

@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
-import { appendBrokerEvents, sha256, stableJson } from './event-store.mjs';
+import { appendBrokerEvents, sha256, stableJson, verifyEventTail } from './event-store.mjs';
 import { attestSource, planSourceAttestation } from './source-attestation.mjs';
 
 export function sourceAttestation(provider, source, observedAt) {
@@ -108,6 +108,23 @@ export async function deliverLifecycleOutbox(inputOptions) {
   const pendingRoot = join(lifecycleRoot, 'event-outbox', 'pending');
   if (!existsSync(pendingRoot)) {
     return { deliveredEntries: 0, deliveredEvents: 0, attestedSubjectRefs: [] };
+  }
+  // The first hook run after activation legitimately seeds an empty store. What is never
+  // legitimate is an empty store *after this lifecycle has already delivered events*: a
+  // delivered receipt proves the chain existed, so a missing head now means the hook is
+  // looking at the wrong or a partially visible directory, not at a fresh store. That is
+  // exactly how a second genesis got written beside the real chain and failed verification
+  // for every reader. Refuse and leave the outbox pending; a deliberate rebuild opts in.
+  const deliveredRoot = join(lifecycleRoot, 'event-outbox', 'delivered');
+  const deliveredBefore = existsSync(deliveredRoot) &&
+    readdirSync(deliveredRoot).some((name) => /^[a-f0-9]{64}\.json$/u.test(name));
+  if (deliveredBefore && inputOptions.allowGenesis !== true) {
+    const tip = verifyEventTail({ runtimeRoot: inputOptions.eventRuntimeRoot, count: 1 });
+    if (tip.head.sequence === 0) {
+      throw new Error('Lifecycle delivery refused to start a new event chain: this lifecycle has ' +
+        'delivered events before, but the event store now shows no committed head. The store ' +
+        'is most likely not the one you think it is. Pass allowGenesis only for a deliberate rebuild.');
+    }
   }
   mkdirSync(join(lifecycleRoot, 'event-outbox', 'delivered'), { recursive: true });
   let deliveredEntries = 0;
