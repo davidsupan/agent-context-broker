@@ -4,6 +4,7 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   renameSync,
   unlinkSync,
   writeFileSync
@@ -148,16 +149,44 @@ function outstandingCount(pendingPath, deliveredPath, pattern) {
 export function diagnoseBroker(inputOptions = {}) {
   const runtimeRoot = resolve(inputOptions.runtimeRoot);
   const eventRuntimeRoot = resolve(inputOptions.eventRuntimeRoot ?? runtimeRoot);
+  // Identity is the resolved physical path plus the head hash, never the lexical
+  // pathname alone. The same pathname has been observed to resolve to different
+  // directories from different processes on one machine, and a store that verifies
+  // cleanly proves nothing about the store another process reads. Report both roots,
+  // whether resolution crossed a reparse point, and distinguish a store that does not
+  // exist from one that is initialised and empty.
+  const resolvedPath = (path) => {
+    try { return realpathSync.native ? realpathSync.native(path) : realpathSync(path); } catch { return null; }
+  };
+  const runtime = {
+    lexicalRoot: runtimeRoot,
+    resolvedRoot: resolvedPath(runtimeRoot),
+    lexicalEventRoot: eventRuntimeRoot,
+    resolvedEventRoot: resolvedPath(eventRuntimeRoot),
+    crossesReparsePoint: null
+  };
+  runtime.crossesReparsePoint = runtime.resolvedEventRoot === null
+    ? null
+    : resolve(runtime.resolvedEventRoot) !== resolve(eventRuntimeRoot);
+
+  const headPath = join(eventRuntimeRoot, 'events', 'head.json');
+  const recordsPath = join(eventRuntimeRoot, 'events', 'records');
+  const recordCount = fileCount(recordsPath, /^\d{12}-[a-f0-9]{64}\.json$/u);
   let eventStore;
-  try {
-    const verified = verifyEventStore({ runtimeRoot: eventRuntimeRoot });
-    eventStore = {
-      status: 'verified',
-      eventCount: verified.events.length,
-      headHash: verified.head.headHash
-    };
-  } catch (error) {
-    eventStore = { status: 'invalid', errorClass: error.name };
+  if (!existsSync(headPath) && !existsSync(recordsPath)) {
+    eventStore = { status: 'missing', eventCount: 0, recordCount: 0, headHash: null };
+  } else {
+    try {
+      const verified = verifyEventStore({ runtimeRoot: eventRuntimeRoot });
+      eventStore = {
+        status: verified.events.length === 0 ? 'empty' : 'verified',
+        eventCount: verified.events.length,
+        recordCount,
+        headHash: verified.head.headHash
+      };
+    } catch (error) {
+      eventStore = { status: 'invalid', errorClass: error.name, message: error.message, recordCount };
+    }
   }
   const state = readJson(join(runtimeRoot, 'state.json'));
   const registry = readJson(join(runtimeRoot, 'accepted-snapshots.json'));
@@ -168,6 +197,7 @@ export function diagnoseBroker(inputOptions = {}) {
     schemaVersion: 1,
     mode: 'doctor',
     writesEnabled: false,
+    runtime,
     eventStore,
     reconciliation: {
       stateRevision: state?.revision ?? null,

@@ -162,6 +162,47 @@ describe('Bun installation manager', () => {
     assert.equal(existsSync(join(input.runtimeHome, 'install-state.json')), false);
   });
 
+  test('upgrade is a plan-bound remove followed by a plan-bound install on the same home', () => {
+    // The installer refuses to overwrite recorded state, so upgrading an existing
+    // installation is two explicit steps, each with its own digests. Unrelated handlers
+    // added after the first install must survive both.
+    const root = testRoot('upgrade');
+    const input = options(root, 'codex');
+    mkdirSync(input.codexHome, { recursive: true });
+    writeFileSync(join(input.codexHome, 'hooks.json'), `${JSON.stringify({
+      hooks: { SessionStart: [{ hooks: [{ type: 'command', command: 'existing-handler' }] }] }
+    })}\n`, 'utf8');
+    const first = executeInstall(input);
+
+    const configPath = join(input.codexHome, 'hooks.json');
+    const changed = JSON.parse(readFileSync(configPath, 'utf8'));
+    changed.hooks.Stop[0].hooks.push({ type: 'command', command: 'later-handler' });
+    writeFileSync(configPath, `${JSON.stringify(changed, null, 2)}\n`, 'utf8');
+
+    // A second plain install is refused while state is recorded: the guard holds.
+    assert.throws(() => manageInstallation(input), /already recorded/u);
+
+    const removeInput = { ...input, action: 'remove' };
+    const removePlan = manageInstallation(removeInput);
+    manageInstallation({ ...removeInput, expectedPlanDigest: removePlan.planDigest, execute: true });
+    assert.equal(existsSync(join(input.runtimeHome, 'install-state.json')), false);
+
+    const second = executeInstall(input);
+    assert.equal(existsSync(join(input.runtimeHome, 'install-state.json')), true);
+    assert.notEqual(second.state.installedAt, first.state.installedAt);
+
+    const remaining = JSON.parse(readFileSync(configPath, 'utf8'));
+    const commands = Object.values(remaining.hooks).flatMap((groups) => groups)
+      .flatMap((group) => group.hooks).map((hook) => hook.command);
+    assert.ok(commands.includes('existing-handler'));
+    assert.ok(commands.includes('later-handler'));
+    const managed = commands.filter((command) => /agent-context-broker|cli\.mjs/u.test(command));
+    assert.ok(managed.length > 0, 'the managed handlers are installed again');
+    const perEvent = Object.values(remaining.hooks).map((groups) =>
+      groups.flatMap((group) => group.hooks).filter((hook) => /agent-context-broker|cli\.mjs/u.test(hook.command)).length);
+    assert.ok(perEvent.every((count) => count <= 1), 'no event carries a duplicated managed handler');
+  });
+
   test('rollback restores byte-exact pre-install state', () => {
     const root = testRoot('rollback');
     const input = options(root, 'codex');

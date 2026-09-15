@@ -204,11 +204,16 @@ export function branchTicketScope(cwd) {
         const head = readFileSync(headPath, 'utf8').slice(0, 512).trim();
         const ref = /^ref:\s*refs\/heads\/(?<branch>.+)$/u.exec(head);
         if (!ref) return null;
-        const ticket = /\b(?<project>[A-Z][A-Z0-9]{1,15})-(?<number>\d+)\b/u
-          .exec(ref.groups.branch.toUpperCase());
-        return ticket
-          ? { kind: 'ticket', key: `${ticket.groups.project}-${ticket.groups.number}` }
-          : null;
+        // A branch naming two different tickets is as ambiguous as a prompt naming two.
+        // Taking the first match would let an ambiguous prompt fall back to an equally
+        // ambiguous branch and inject context for the wrong task, so exactly one distinct
+        // ticket is required; the same ticket repeated is fine.
+        const keys = new Set();
+        for (const match of ref.groups.branch.toUpperCase()
+          .matchAll(/\b(?<project>[A-Z][A-Z0-9]{1,15})-(?<number>\d+)\b/gu)) {
+          keys.add(`${match.groups.project}-${match.groups.number}`);
+        }
+        return keys.size === 1 ? { kind: 'ticket', key: [...keys][0] } : null;
       }
       const parent = dirname(directory);
       if (parent === directory) return null;

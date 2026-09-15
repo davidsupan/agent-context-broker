@@ -55,8 +55,10 @@ the branch rather than failing closed with no scope at all.
 Query terms narrow results within the resolved scope. For a ticket or merge
 request the agent is actively working, claims on that exact scope survive a term
 miss, because returning nothing for the current task is worse than returning a
-little. Broader project and workstream scopes stay term-filtered, and related
-scopes always require a term match so a parent ticket cannot flood a query.
+little. Broader project and workstream scopes stay term-filtered, and when terms are
+given, related scopes require a term match so a parent ticket cannot flood a
+query. A query with no terms does not term-filter related scopes; the snapshot
+and claim bounds are the only limit there.
 
 ## Ingestion cost
 
@@ -201,12 +203,14 @@ old records under new code proves nothing about this; check new records under th
 
 ## Parallel chains
 
-A verification failure does not always mean the chain is damaged. The costliest outage this
-broker has had was a **second genesis written beside the real chain**: a lifecycle hook ran
-with a view of the store in which no head and no records were visible, appended sequences
-1–4 as a fresh chain, and its writes landed in the real records directory. Two files per
-sequence then failed every full verification for every reader, while the committed chain
-itself was intact the whole time.
+A verification failure does not always mean the chain is damaged. In the process view the
+agents' launcher used during the 2026-09-14/15 outage, the records directory held a
+**second genesis beside the committed chain**: a lifecycle hook had run with a view in
+which no head and no records were visible and appended sequences 1–4 as a fresh chain.
+Two files per sequence then failed every full verification in that view, while the
+committed chain itself was intact. (Other process views of the same pathname showed
+different, unforked contents; see Runtime homes. The same outage also included a
+descriptor-bearing artifact that the deployed reader could not verify.)
 
 Two things now make that impossible to mistake for corruption. `recordFiles` refuses a
 directory holding two records for one sequence and names the sequences as a parallel chain,
@@ -226,17 +230,23 @@ additive change; the handoff submitter reports the submitting agent instead.
 Every core command takes explicit roots, and the launcher and lifecycle bridges
 derive them from one place: `AGENT_CONTEXT_BROKER_HOME`, falling back to the
 platform default (`%LOCALAPPDATA%\AgentContextBroker` on Windows). That
-resolution is the definition of "the live broker". A second runtime tree can
-exist on disk from an earlier layout, and it can look healthy, hold more events,
-and verify cleanly while no agent reads it. Work done against it — ingestion,
-publication, repair — is invisible to the agents and invisible to their
-failures.
+resolution is where "the live broker" begins, not where it ends. On one
+workstation the same pathname resolved to different directories from different
+processes: a native elevated process followed a junction into an older
+`…\Ocean\…` tree, while harness-spawned processes — including the agents' own
+hooks — saw separate directories with different chains. Each verified cleanly.
+Work done against any one of them (ingestion, publication, repair) is invisible
+to a reader in another.
 
-The consequences are operational rather than architectural. Diagnosis starts by
-printing the resolved root, or by tracing the launcher's child argv, before any
-verification is trusted. `doctor` names the store it verified. And forward
-compatibility is checked against the reader that actually runs — the installed
-tool — not against the checkout being edited.
+So identity is the resolved physical path **and** the committed head hash,
+together. `doctor` reports the lexical and resolved roots, whether resolution
+crossed a reparse point, the record count and the head hash, and distinguishes a
+`missing` store from an initialised `empty` one. Diagnosis runs from the same
+kind of process that will read the store and compares head hashes across views
+before any verification is trusted. Forward compatibility is checked against the
+reader that actually runs — the installed tool — not the checkout being edited.
+Merging or re-ingesting between trees is a decision that needs both hashes on
+the table, never a path comparison.
 
 ## Trust boundaries
 

@@ -159,16 +159,28 @@ for (const entry of selected) {
 
 console.log('round-trip decompress : ' + restored + ' / ' + selected.length +
   (options.full ? ' (full)' : ' (sample, stride ' + stride + ')'));
+// A source that yields nothing is a wrong path, not a clean result. "0 / 0 still match"
+// with exit 0 would let a mistyped --source pass as a green deletion gate.
+let sourceMissing = 0;
 if (options.source) {
+  if (sourceChecked === 0) {
+    sourceMissing = 1;
+    console.error('  NO ORIGINALS FOUND under --source ' + resolve(options.source) +
+      ' for the ' + selected.length + ' checked entries; wrong directory?');
+  }
   console.log('source still matches  : ' + (sourceChecked - sourceDrift) + ' / ' + sourceChecked +
+    ' (of ' + selected.length + ' checked entries present under --source)' +
     (sourceDrift ? ' - drifted files are NOT safe to prune from this archive' : ''));
+  if (!options.full) {
+    console.log('note                  : this is a sample; only --full with --source is a deletion gate');
+  }
 }
 
-// Source drift counts as a failure. This command exists to answer "is it safe to delete
-// the originals", and a drifted original is precisely the case where the answer is no, so
-// reporting it while exiting 0 turns the exit code into a trap for anyone scripting the
-// check.
-const failures = missing + sizeMismatch + packedMismatch + restoreFailed + sourceDrift;
+// Source drift counts as a failure, and so does a source that matched nothing. This
+// command exists to answer "is it safe to delete the originals", and both cases are
+// precisely where the answer is no; reporting them while exiting 0 turns the exit code
+// into a trap for anyone scripting the check.
+const failures = missing + sizeMismatch + packedMismatch + restoreFailed + sourceDrift + sourceMissing;
 console.log('');
 if (failures === 0) {
   console.log('archive verified: every checked entry is intact and restores to its original hash');

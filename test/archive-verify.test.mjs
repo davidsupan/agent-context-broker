@@ -136,6 +136,20 @@ describe('corpus archiving proves recoverability per file', () => {
 });
 
 describe('the verifier fails when the archive is not actually intact', () => {
+  test('a --source that matches nothing is a failure, not a clean result', () => {
+    const source = corpus(testRoot('source-wrongdir'));
+    const target = testRoot('target-wrongdir');
+    assert.equal(archive(source, target).status, 0);
+
+    // A mistyped source directory used to print "0 / 0 still match" and exit 0. This
+    // command is the deletion gate, so a source that yields no originals must fail.
+    const wrong = testRoot('not-the-source');
+    const verify = run('verify-archive.mjs', ['--archive', target, '--source', wrong, '--full']);
+    assert.equal(verify.status, 1);
+    assert.match(verify.stdout + verify.stderr, /NO ORIGINALS FOUND/u);
+    assert.match(verify.stdout, /archive NOT verified/u);
+  });
+
   test('detects a corrupted archive entry', () => {
     const source = corpus(testRoot('source-corrupt'));
     const target = testRoot('target-corrupt');

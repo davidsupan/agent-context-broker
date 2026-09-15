@@ -78,21 +78,30 @@ The high-level launcher chooses a private runtime directory below:
 - `$HOME/Library/Application Support/AgentContextBroker` on macOS.
 
 `AGENT_CONTEXT_BROKER_HOME` overrides that default, and the installed lifecycle
-bridges export it, so **the runtime the agents actually use is whatever that
-variable resolves to** — not necessarily the directory you happen to be looking
-at. Older layouts may leave a second runtime behind (for example an
-`…\Ocean\AgentContextBroker` tree on Windows); nothing in this version reads
-it, and verifying or repairing it tells you nothing about the live store. Print
-the resolved root before any diagnosis:
+bridges export it. The pathname alone does not identify the store: on one
+Windows workstation the same `…\runtime` path resolved to different directories
+from different processes (a native elevated process saw a junction into an older
+`…\Ocean\AgentContextBroker` tree; harness-spawned processes, including the
+agents' hooks, saw a separate directory). A store that verifies cleanly in one
+view proves nothing about the store another process reads.
+
+Bind diagnosis to the resolved path **and** the head hash. `doctor` reports the
+lexical and resolved roots, whether resolution crossed a reparse point, the record
+count, and the head hash, and distinguishes a `missing` store from an initialised
+`empty` one. Run it from the same kind of process that will read the store (for
+hooks, an ordinary user process), and compare the head hash with what a hook run
+reports:
 
 ```sh
-bun scripts/agent-context.mjs route --provider claude-code --project-scope
-bun src/cli.mjs doctor --runtime-root "$AGENT_CONTEXT_BROKER_HOME/runtime" \
-  --event-runtime-root "$AGENT_CONTEXT_BROKER_HOME/runtime/events"
+HOME_DIR="${AGENT_CONTEXT_BROKER_HOME:-<platform default above>}"
+bun src/cli.mjs doctor --runtime-root "$HOME_DIR/runtime/reconciliation" \
+  --event-runtime-root "$HOME_DIR/runtime/events"
 ```
 
-`doctor` names the event store it verified; if that path is not the one your
-hooks resolve, you are looking at the wrong runtime.
+If `AGENT_CONTEXT_BROKER_HOME` is unset, substitute the platform default
+explicitly; shell interpolation of an unset variable yields `/runtime`, not the
+default. `route` returns profile routing metadata and does not print a runtime
+root.
 
 Commands plan changes by default:
 
@@ -122,8 +131,10 @@ implicit project routing.
 | `AGENT_CONTEXT_BROKER_REVIEW_LEDGERS_ROOT` | Optional review metadata root |
 | `AGENT_CONTEXT_BROKER_RECONCILIATION_RUNTIME` | Override the reconciliation root (defaults below the runtime home) |
 | `AGENT_CONTEXT_BROKER_EVENT_RUNTIME` | Override the event-store root (defaults below the runtime home) |
-| `ACB_AGENT_KIND` | Self-declared caller kind for descriptors: `interactive`, `subagent`, `scheduled`, `sdk` |
-| `ACB_AGENT_MODEL` / `ANTHROPIC_MODEL` | Self-declared model name recorded on progress and audits |
+
+Caller descriptors are supplied explicitly with `--agent-kind`, `--agent-model`,
+`--agent-harness` and `--agent-instance` on `progress`, `publish` and `query`.
+No environment variable populates them automatically.
 
 ## Backfill history
 
@@ -154,10 +165,42 @@ bun scripts/prune-archived-corpus.mjs --source <transcripts> --archive <archive>
 bun scripts/prune-archived-corpus.mjs ... --ledger <ledger-path> --restore --execute
 ```
 
-`verify-archive` exits non-zero when any archived file cannot be restored or any
-original changed after archiving; treat its exit code, not its prose, as the
-gate before deleting originals. Keep the prune ledger outside the quarantine so
-deleting the quarantine cannot delete the record of what it held.
+`verify-archive` exits non-zero when any archived file cannot be restored, when
+any original changed after archiving, or when `--source` matched no originals at
+all (a mistyped directory is a failure, not a clean result). Only `--full`
+together with `--source` covers every entry; the default run is a sample and
+says so. Even a clean full run is evidence for a decision, not the decision:
+deletion stays a separate, explicit step. Keep the prune ledger outside the
+quarantine so deleting the quarantine cannot delete the record of what it held.
+
+## Upgrade an existing installation
+
+The installer refuses to write over recorded installation state, and that guard
+is not bypassed for upgrades. Upgrading is two explicit, plan-bound steps against
+the same runtime home, each with its own digests:
+
+```sh
+# 1. remove the managed files and handlers (refuses if a managed target drifted)
+bun scripts/manage-agent-context-broker-installation.mjs remove \
+  --runtime-home <runtime-home> > remove-plan.json
+bun scripts/manage-agent-context-broker-installation.mjs remove \
+  --runtime-home <runtime-home> \
+  --expected-plan-digest <planDigest-from-remove-plan> --execute
+
+# 2. install the new package
+bun scripts/manage-agent-context-broker-installation.mjs install \
+  --provider <provider> --runtime-home <runtime-home> > install-plan.json
+bun scripts/manage-agent-context-broker-installation.mjs install \
+  --provider <provider> --runtime-home <runtime-home> \
+  --expected-manifest-digest <manifestDigest> --expected-plan-digest <planDigest> --execute
+```
+
+Removal keeps unrelated handlers and configuration changes made after the first
+installation, and each step keeps its own backups. Between the two steps the
+provider has no broker handlers, so hooks fail open and agents run without
+current context until step 2 completes; do it in one sitting, and restart the
+provider afterwards. A managed target that changed since installation blocks
+step 1 — inspect the drift, do not delete `install-state.json` to get past it.
 
 ## Remove or roll back
 

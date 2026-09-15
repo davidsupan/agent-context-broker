@@ -147,7 +147,7 @@ bun src/cli.mjs migrate-events \
 bun scripts/audit-ingested-events.mjs <runtime>/events
 ```
 
-The audit reports the valid/transaction time split, lists any event dated ahead of its own write by sequence number, and confirms that no payload holds conversation text.
+The audit reports the valid/transaction time split, lists any event dated ahead of its own write by sequence number, and flags payloads containing long non-hash strings. That last check is a heuristic for leaked prose, not a proof that no conversation text or secret is present; the content-safety layer at write time is the actual boundary.
 
 ### Archive, verify, and prune a transcript corpus
 

@@ -160,6 +160,47 @@ describe('batched event ingestion', () => {
       'a replayed event must not be appended twice because the index lost its entry');
   });
 
+  test('an index with a duplicated row cannot make a replay append twice', async () => {
+    const runtimeRoot = root('dup-row-index');
+    const inputs = Array.from({ length: 3 }, () => candidate());
+    await appendBrokerEvents({ runtimeRoot, events: inputs, execute: true });
+
+    // Same line count as an intact index, same tip, but one key appears twice and one
+    // key is gone. A count check accepts this; the replay of the missing key was appended
+    // as a new event.
+    const lines = readFileSync(indexPath(runtimeRoot), 'utf8').split('\n').filter(Boolean);
+    writeFileSync(indexPath(runtimeRoot), [lines[0], lines[0], lines[2]].join('\n') + '\n', 'utf8');
+
+    const replay = await appendBrokerEvents({ runtimeRoot, events: inputs, execute: true });
+    assert.deepEqual(replay.map((event) => event.idempotentReplay), [true, true, true]);
+    assert.equal(recordCount(runtimeRoot), 3, 'a replay must never increase the record count');
+  });
+
+  test('an index with two keys swapped cannot acknowledge the wrong event', async () => {
+    const runtimeRoot = root('swapped-index');
+    const inputs = Array.from({ length: 3 }, () => candidate());
+    await appendBrokerEvents({ runtimeRoot, events: inputs, execute: true });
+
+    // Right count, right tip, distinct keys and sequences, and still wrong: key A points
+    // at record B and vice versa. Only checking the loaded record's own key catches it.
+    const rows = readFileSync(indexPath(runtimeRoot), 'utf8').split('\n').filter(Boolean)
+      .map((line) => JSON.parse(line));
+    const swapped = [
+      { ...rows[0], sequence: rows[1].sequence },
+      { ...rows[1], sequence: rows[0].sequence },
+      rows[2]
+    ];
+    writeFileSync(indexPath(runtimeRoot), swapped.map((row) => JSON.stringify(row)).join('\n') + '\n', 'utf8');
+
+    const replay = await appendBrokerEvents({ runtimeRoot, events: inputs, execute: true });
+    assert.deepEqual(replay.map((event) => event.idempotentReplay), [true, true, true]);
+    for (let index = 0; index < inputs.length; index += 1) {
+      assert.equal(replay[index].idempotencyKey, inputs[index].idempotencyKey,
+        'a replay must return the event that carries the requested key');
+    }
+    assert.equal(recordCount(runtimeRoot), 3);
+  });
+
   test('a stale index is rebuilt rather than trusted', async () => {
     const runtimeRoot = root('stale-index');
     const inputs = Array.from({ length: 3 }, () => candidate());

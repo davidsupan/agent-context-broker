@@ -47,21 +47,34 @@ disk that nothing reads. Verifying, repairing, or backfilling that tree proves
 nothing about the store agents use. Print the resolved root first; `doctor`
 names the store it verified.
 
-## Incident record: parallel chain, 2026-09-14/15
+## Incident record: divergent runtime views, 2026-09-14/15
 
-Every full verification of the shared store failed for about eighteen hours
-with `Broker event chain verification failed.` The chain was intact. A lifecycle
-hook had run with a filesystem view in which neither the head nor the records
-were visible, appended sequences 1–4 as a fresh genesis, and its writes landed
-in the real records directory beside the legitimate ones. Two files per
-sequence, and every reader stopped.
+What was observed, in the order it became known:
 
-Repair: back up the runtime; move only the files the committed head does not
-reference into a quarantine; verify. The head was never rewritten and no
-integrity check was bypassed. Hardening: parallel chains are named by sequence,
-and hooks cannot start a genesis once receipts exist. Lesson recorded here so it
-is not relearned: the repair was first attempted on a runtime the agents did not
-read; always resolve the live root before touching a store.
+- Agents reported `Broker event chain verification failed.` from the installed
+  launcher for roughly eighteen hours. In the process view the launcher used,
+  the records directory held two files each for sequences 1–4: a legitimate
+  chain and a second genesis written by a lifecycle hook whose view showed no
+  head and no records. Moving the four foreign files aside (backup first, head
+  untouched) made that view verify again and the failing query return.
+- The same period also contained a real defect of this project's own making: a
+  peer-progress artifact carrying the then-new `agent` field had been published
+  into a store read by an installed tool that predates the field. That reader
+  verifies every current artifact before scoping, so one unrelated artifact
+  failed every query until it was superseded by a plain revision.
+- An independent review then read the same pathname from a native elevated
+  process and found it resolving through a junction into an older
+  `…\Ocean\…` tree holding a different, unforked 4,033-event chain. Two more
+  process views on the same workstation showed two further, mutually different
+  contents. No single "real store" could be established from inside the tools;
+  the operationally relevant one is whichever the hooks' processes resolve.
+
+Conclusions that hold regardless of which view is called real: the pathname
+does not identify the store; identity is the resolved path **and** the head
+hash, reported by `doctor`; artifacts must stay readable by the deployed reader;
+a records directory with two files for one sequence is a parallel chain, named
+as such; and a hook must not start a genesis once receipts exist. Nothing in
+this record authorises merging, re-ingesting, or deleting either tree.
 
 ## Responsible disclosure
 

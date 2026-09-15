@@ -30,6 +30,18 @@ describe('branch-derived ticket scope', () => {
     assert.deepEqual(branchTicketScope(cwd), { kind: 'ticket', key: 'OC-18404' });
   });
 
+  test('refuses a branch that names two different tickets', () => {
+    // Falling back from an ambiguous prompt must not land on an equally ambiguous branch
+    // and quietly pick the first key; that injects context for the wrong task.
+    const cwd = tempRepository('ref: refs/heads/feature/OC-1-and-OC-2');
+    assert.equal(branchTicketScope(cwd), null);
+  });
+
+  test('accepts the same ticket repeated in a branch name', () => {
+    const cwd = tempRepository('ref: refs/heads/feature/OC-7-followup-OC-7');
+    assert.deepEqual(branchTicketScope(cwd), { kind: 'ticket', key: 'OC-7' });
+  });
+
   test('finds the repository from a nested working directory', () => {
     const cwd = tempRepository('ref: refs/heads/bugfix/OC-19292-preserve-errors');
     const nested = join(cwd, 'src', 'areas', 'assets');
