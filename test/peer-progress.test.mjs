@@ -186,6 +186,42 @@ describe('peer progress', () => {
     assert.equal(related.progress[0].provider, 'codex');
   });
 
+  test('shared Bun wrapper forwards the caller descriptor to the stored artifact', async () => {
+    // The launcher is what agents actually call, so a flag documented on it has to be
+    // accepted by it, not only by the core CLI underneath.
+    const home = root('wrapper-agent-home');
+    const eventRuntimeRoot = join(home, 'runtime', 'events');
+    mkdirSync(eventRuntimeRoot, { recursive: true });
+    // The launcher routes ticket-scoped publication audit into the ticket package.
+    ticket(join(home, 'tickets'), 'APP-10003');
+    const token = await source(eventRuntimeRoot, 'codex', 'wrapper-agent');
+    const proposalPath = join(root('wrapper-agent-input'), 'proposal.json');
+    writeFileSync(proposalPath, `${JSON.stringify(
+      proposal(token, 'APP-10003', 'Descriptor travels through the launcher'), null, 2
+    )}\n`, 'utf8');
+
+    const result = spawnSync(process.execPath, [sharedWrapper(), 'progress',
+      '--provider', 'codex',
+      '--proposal', proposalPath,
+      '--runtime-home', home,
+      '--agent-kind', 'subagent',
+      '--agent-model', 'test-model',
+      '--agent-instance', 'run-42',
+      '--execute'
+    ], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    const output = JSON.parse(result.stdout);
+
+    const artifact = JSON.parse(readFileSync(
+      join(home, 'runtime', 'reconciliation', 'peer-progress', 'records', `${output.progressId}.json`), 'utf8'));
+    assert.equal(artifact.agent.kind, 'subagent');
+    assert.equal(artifact.agent.model, 'test-model');
+    assert.equal(artifact.agent.attestation, 'self-declared');
+    // The raw instance id never lands on disk; only its hash does.
+    assert.match(artifact.agent.instanceHash, /^[a-f0-9]{64}$/u);
+    assert.equal(JSON.stringify(artifact).includes('run-42'), false);
+  });
+
   test('CLI progress publication remains plan-only without execute', async () => {
     const runtimeRoot = root('cli-runtime');
     const eventRuntimeRoot = root('cli-events');

@@ -210,6 +210,8 @@
             <div><dt>Provenance</dt><dd>Claims carry source hashes. Accepted snapshots are content-addressed and hashes are checked again on read.</dd></div>
             <div><dt>Metadata-only audit</dt><dd>Audit records contain hashes, counts, watermarks, warnings, and dispositions, never prompts or responses.</dd></div>
             <div><dt>Caller identity</dt><dd>Progress and audits can record the publishing agent: kind, harness, model, and a hashed instance id. It is self-declared and descriptive, so it never raises confidence, changes acceptance, or outranks another actor.</dd></div>
+            <div><dt>One runtime home</dt><dd>The live store is whatever <code>AGENT_CONTEXT_BROKER_HOME</code> resolves to. <code>doctor</code> names the store it verified, so a healthy-looking runtime nobody reads cannot be mistaken for the live one.</dd></div>
+            <div><dt>Recovery without rewriting</dt><dd>A second genesis written beside the real chain is reported as a parallel chain, by sequence; hooks cannot start a chain once receipts exist. Repair moves foreign records aside and never rewrites the committed head.</dd></div>
           </dl>
         </div>
       </section>

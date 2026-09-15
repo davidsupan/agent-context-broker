@@ -2,7 +2,7 @@
 
 Agent Context Broker is a local-first, provider-neutral open-source beta for sharing small, source-linked pieces of context between coding agents. It turns bounded provider metadata and explicitly observed decisions into structured context that another agent can query, without copying whole conversations.
 
-The repository contains a provider-neutral core, schemas, and optional provider bridges. Its current adapters are for Codex and Claude Code.
+The repository contains a provider-neutral core, schemas, and optional provider bridges. Its current adapters are for Claude Code and Codex; Claude Code is the operational provider, and the Codex adapter is retained for parity (see [Providers](#providers)).
 
 > **Beta:** `0.10.0-beta.7` is the current source version. The API and storage contracts can change while the project is being evaluated.
 
@@ -22,8 +22,9 @@ Coding agents often need a small amount of trusted context from earlier work, bu
 The broker treats provider transcripts as private source material.
 
 - Adapters inventory bounded metadata and derived claims. They do not pass raw prompts, responses, tool arguments, tool results, native session identifiers, or credentials to another agent.
-- Adapters are read-only by default, use bounded configured roots, and do not modify, archive, or delete native histories.
-- Accepted context is reconciled and hash-checked before it is used as durable context. Live peer progress is always labeled unverified and expires by TTL; it is not treated as a verified fact.
+- Adapters are read-only by default, use bounded configured roots, and do not modify, archive, or delete native histories. Corpus archiving and pruning exist as separately invoked scripts that keep a per-file restore proof and never delete anything on their own.
+- Three kinds of context are kept apart. Accepted context is reconciled and hash-checked before it is used as durable context. Live peer progress is always labeled unverified and expires by TTL. The model-assisted lane holds conclusions extracted from transcripts for human review and can never enter accepted context on its own.
+- Caller identity on progress and audits is self-declared description — kind, harness, model, hashed instance — and never authorization: it changes no acceptance, ranking, or scope decision.
 - Strict isolation returns before reading broker registries or writing audits. Provider hooks fail open for agent availability, while schema, path, integrity, attestation, and secret checks fail closed.
 - Runtime state is intended for private local storage. Audit records contain bounded metadata such as hashes, counts, watermarks, warnings, and dispositions.
 
@@ -35,8 +36,8 @@ Read the [security model](docs/security-model.md) before enabling a lifecycle br
 
 The current repository includes these provider adapters and lifecycle bridge packages:
 
-- Codex: [`providers/codex`](providers/codex)
-- Claude Code: [`providers/claude-code`](providers/claude-code)
+- Claude Code: [`providers/claude-code`](providers/claude-code) — the operational provider.
+- Codex: [`providers/codex`](providers/codex) — retained in the package for parity and conformance tests. Since 2026-09-15 it is not in operational use in the maintainer's environment; it is neither removed nor advertised as actively exercised.
 
 Other providers are not advertised as supported by this beta. A new provider needs an adapter that follows [`adapters/CONTRACT.md`](adapters/CONTRACT.md).
 
@@ -126,6 +127,53 @@ bun scripts/agent-context.mjs progress \
 
 Progress is immutable, time-limited, and explicitly labeled unverified. The example is a shape to adapt to the current task, not a substitute for checking the proposal and its scope.
 
+Add `--agent-kind`, `--agent-model`, `--agent-harness`, and `--agent-instance` to record which agent published a checkpoint or read context. The descriptor is stored as self-declared description with a hashed instance id; it never acts as authorization, and an artifact written without one carries no `agent` key, so older readers keep working.
+
+### How a query resolves its scope
+
+A query resolves scope as a small relation graph rather than one exact key: a claim on a parent ticket is visible while working its child, and a merge-request scope reaches its ledger-confirmed tickets. When no scope is given, the lifecycle bridge derives one from the prompt, the workstream key, the ticket-shaped working directory, and finally the **current git branch**, which is the most reliable signal on a machine that uses one worktree per ticket. See [Scope resolution](docs/architecture.md#scope-resolution).
+
+### Backfill history without quadratic cost
+
+Ingested history keeps two clocks: `occurredAt` is taken from the source's newest record (valid time), `recordedAt` from the run (transaction time), so old threads never outrank current context. Batched appends verify the tip once and publish one head per batch, which makes ingestion roughly linear in the number of events:
+
+```sh
+bun src/cli.mjs migrate-events \
+  --ledger-dir <inventory-ledger-dir> \
+  --runtime-root <runtime> \
+  --event-runtime-root <runtime>/events \
+  --execute
+
+bun scripts/audit-ingested-events.mjs <runtime>/events
+```
+
+The audit reports the valid/transaction time split, lists any event dated ahead of its own write by sequence number, and confirms that no payload holds conversation text.
+
+### Archive, verify, and prune a transcript corpus
+
+Provider transcripts grow far faster than the broker does. These scripts are deliberately not adapter functions and never delete anything:
+
+```sh
+bun scripts/archive-corpus.mjs --source <transcripts> --archive <archive> --execute
+bun scripts/verify-archive.mjs --archive <archive> --source <transcripts> --full
+bun scripts/prune-archived-corpus.mjs --source <transcripts> --archive <archive> \
+  --quarantine <quarantine> --ledger <ledger-outside-quarantine> --keep-days 14 --execute
+```
+
+Every archived file carries a per-file round-trip proof; verification re-reads the archive from disk and fails on any original that changed since it was archived; pruning is a rename into a quarantine with a restore ledger, so reclaiming space is a separate, deliberate deletion. See [Corpus archiving](docs/architecture.md#corpus-archiving).
+
+### Propose conclusions through the model-assisted lane
+
+Conclusions extracted from transcripts enter the broker only as review material:
+
+```sh
+bun scripts/extract-handoff-candidates.mjs --source <transcripts> --provider claude-code \
+  --scope-kind project --scope-key <project> --out proposal.json
+bun scripts/propose-handoff-claims.mjs --proposal proposal.json --runtime-root <runtime>/reconciliation --execute
+```
+
+The extractor mines operator turns only — sidechain and tool-result records are excluded structurally — and the submitter forces `agent-handoff` / `unverified` regardless of what the proposal asked for, then fails unless reconciliation held the batch for evidence review. Promotion means resubmitting a claim with evidence the broker can check. See [The model-assisted lane](docs/architecture.md#the-model-assisted-lane).
+
 ### Enable a provider bridge
 
 Bridge packages live under [`providers/`](providers/). Validate the checkout and review the security model before integrating a bridge with a provider lifecycle hook. Hooks are optional, and the supported lifecycle events vary by provider. Set `AGENT_CONTEXT_BROKER_STRICT_ISOLATION=1` when a provider hook must return before broker reads and writes.
@@ -135,7 +183,7 @@ Bridge packages live under [`providers/`](providers/). Validate the checkout and
 - [`src/`](src/): provider-neutral inventory, routing, reconciliation, publication, event, and read-model code.
 - [`providers/`](providers/): Codex and Claude Code bridge packages.
 - [`schemas/`](schemas/): JSON Schema contracts for sources, claims, snapshots, events, and progress.
-- [`scripts/`](scripts/): Bun launchers, guarded installation and removal, POSIX helpers, and package validation.
+- [`scripts/`](scripts/): Bun launchers, guarded installation and removal, POSIX helpers, package validation, corpus archiving/verification/pruning (`archive-corpus`, `verify-archive`, `prune-archived-corpus`), the model-assisted lane (`extract-handoff-candidates`, `propose-handoff-claims`), and the ingestion audit (`audit-ingested-events`).
 - [`site/`](site/): the dependency-free static source for the GitHub Pages project site.
 - [`docs/`](docs/): getting started, architecture, security, release, and repository-maintenance guidance.
 

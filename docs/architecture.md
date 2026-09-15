@@ -221,6 +221,23 @@ Accepted-claim provenance is deliberately unchanged. Its field set is fixed and 
 state depends on it, so carrying agent identity there is a schema migration rather than an
 additive change; the handoff submitter reports the submitting agent instead.
 
+## Runtime homes
+
+Every core command takes explicit roots, and the launcher and lifecycle bridges
+derive them from one place: `AGENT_CONTEXT_BROKER_HOME`, falling back to the
+platform default (`%LOCALAPPDATA%\AgentContextBroker` on Windows). That
+resolution is the definition of "the live broker". A second runtime tree can
+exist on disk from an earlier layout, and it can look healthy, hold more events,
+and verify cleanly while no agent reads it. Work done against it — ingestion,
+publication, repair — is invisible to the agents and invisible to their
+failures.
+
+The consequences are operational rather than architectural. Diagnosis starts by
+printing the resolved root, or by tracing the launcher's child argv, before any
+verification is trusted. `doctor` names the store it verified. And forward
+compatibility is checked against the reader that actually runs — the installed
+tool — not against the checkout being edited.
+
 ## Trust boundaries
 
 Provider histories remain private source material. Accepted claims are not

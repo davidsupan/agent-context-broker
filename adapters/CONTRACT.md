@@ -22,6 +22,10 @@ Every adapter declares:
 - preserve immutable per-run inventory and delta artifacts before checkpointing
 - serialize shared checkpoint updates with bounded locking and stale-lock recovery
 - make malformed or skipped records visible
+- take valid time (`occurredAt`) from the source's newest record and transaction
+  time (`recordedAt`) from the run, never the same clock for both
+- deliver inventories to the event store in batches; never re-verify the whole
+  chain per event
 
 ## Bootstrap Contract
 
@@ -85,6 +89,29 @@ Adapters fail open only for context availability, never by claiming success.
 Failures must emit an audit event with provider, event, error class, and whether
 the session continued without current context.
 
+## Runtime Home Contract
+
+- resolve the runtime home once, from `AGENT_CONTEXT_BROKER_HOME` or the
+  platform default, and pass the same resolved roots to every core command
+- never seed an empty event store from a hook: once this lifecycle has a
+  delivered receipt, a missing head means the wrong or a partially visible
+  directory, and delivery must refuse and leave the outbox pending
+- never run hook commands under a filesystem overlay or sandbox that can hide
+  existing runtime files while letting new writes through
+- report the resolved store path in audit output so a wrong-runtime diagnosis is
+  possible after the fact
+
+## Identity Contract
+
+- an adapter may attach a caller descriptor (kind, harness, version, model,
+  instance) to progress publications and query audits
+- the descriptor is self-declared and descriptive; adapters must not read it as
+  authorization, trust, or ranking input, and the core never does
+- hash the instance id before persistence; never persist a raw session or
+  process identifier
+- omit the descriptor entirely when nothing is known; never write an empty or
+  null descriptor into an artifact
+
 ## Conformance Fixtures
 
 Every adapter must cover:
@@ -101,3 +128,8 @@ Every adapter must cover:
 - stale snapshot compare-and-swap failure
 - interrupted snapshot publication
 - disabled adapter rollback
+- parallel chain: two records for one sequence are reported by sequence, and
+  moving the foreign records aside restores verification without a head rewrite
+- hook delivery onto an emptied store is refused once a delivered receipt exists;
+  the first run after activation still seeds
+- an artifact published without a caller descriptor carries no `agent` key
