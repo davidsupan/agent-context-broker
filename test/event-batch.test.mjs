@@ -201,6 +201,49 @@ describe('batched event ingestion', () => {
     assert.equal(recordCount(runtimeRoot), 3);
   });
 
+  test('an index copied from another store is rebuilt, not trusted', async () => {
+    const runtimeRoot = root('foreign-target');
+    const foreign = root('foreign-source');
+    const inputs = Array.from({ length: 3 }, () => candidate());
+    await appendBrokerEvents({ runtimeRoot, events: inputs, execute: true });
+    await appendBrokerEvents({ runtimeRoot: foreign, events: Array.from({ length: 3 }, () => candidate()), execute: true });
+
+    // Whole runtime trees get copied around. The other store's index is well formed for
+    // its own chain - three distinct keys, sequences 1..3 - and every shape check accepts
+    // it; only the binding to this chain's tip can tell it apart.
+    writeFileSync(indexPath(runtimeRoot), readFileSync(indexPath(foreign), 'utf8'), 'utf8');
+    writeFileSync(join(runtimeRoot, 'events', 'idempotency.head.json'),
+      readFileSync(join(foreign, 'events', 'idempotency.head.json'), 'utf8'), 'utf8');
+
+    const replay = await appendBrokerEvents({ runtimeRoot, events: inputs, execute: true });
+    assert.deepEqual(replay.map((event) => event.idempotentReplay), [true, true, true]);
+    assert.equal(recordCount(runtimeRoot), 3, 'a foreign index must not turn replays into appends');
+  });
+
+  test('a chain that ends up holding one key twice fails verification', async () => {
+    const runtimeRoot = root('dup-key-chain');
+    const inputs = Array.from({ length: 2 }, () => candidate());
+    await appendBrokerEvents({ runtimeRoot, events: inputs, execute: true });
+
+    // A fabricated row that is structurally perfect and bound to the right tip cannot be
+    // told from a real one at load time. What must hold is that the damage it enables - a
+    // replay appended as a new record - does not stay hidden: the chain itself refuses.
+    const head = JSON.parse(readFileSync(join(runtimeRoot, 'events', 'head.json'), 'utf8'));
+    const rows = readFileSync(indexPath(runtimeRoot), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+    rows[1].idempotencyKey = sha256('fabricated');
+    writeFileSync(indexPath(runtimeRoot), rows.map((row) => JSON.stringify(row)).join('\n') + '\n', 'utf8');
+    writeFileSync(join(runtimeRoot, 'events', 'idempotency.head.json'),
+      JSON.stringify({ headEventId: head.eventId, count: 2 }) + '\n', 'utf8');
+
+    // The replay of the second key misses the fabricated index and is appended.
+    await appendBrokerEvents({ runtimeRoot, events: [inputs[1]], execute: true });
+    assert.equal(recordCount(runtimeRoot), 3);
+
+    // ...and from then on the store is not a valid chain, which is what keeps this class of
+    // corruption from passing as a well-formed history.
+    assert.throws(() => verifyEventStore({ runtimeRoot }), /same idempotency key twice/u);
+  });
+
   test('a stale index is rebuilt rather than trusted', async () => {
     const runtimeRoot = root('stale-index');
     const inputs = Array.from({ length: 3 }, () => candidate());

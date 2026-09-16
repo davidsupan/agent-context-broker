@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -158,16 +159,35 @@ export function diagnoseBroker(inputOptions = {}) {
   const resolvedPath = (path) => {
     try { return realpathSync.native ? realpathSync.native(path) : realpathSync(path); } catch { return null; }
   };
+  // Reparse detection walks the path components with lstat rather than comparing the
+  // lexical and resolved strings: an 8.3 short name resolves to a different string with
+  // no reparse point anywhere, and a redirected root can resolve to a string that looks
+  // unrelated for reasons that are not a junction either. Node reports both symbolic
+  // links and junctions through isSymbolicLink().
+  const crossesReparsePoint = (path) => {
+    if (!existsSync(path)) return null;
+    let current = resolve(path);
+    const seen = [];
+    while (true) {
+      seen.push(current);
+      const parent = dirname(current);
+      if (parent === current) break;
+      current = parent;
+    }
+    try {
+      return seen.some((component) => lstatSync(component).isSymbolicLink());
+    } catch {
+      return null;
+    }
+  };
   const runtime = {
     lexicalRoot: runtimeRoot,
     resolvedRoot: resolvedPath(runtimeRoot),
+    crossesReparsePoint: crossesReparsePoint(runtimeRoot),
     lexicalEventRoot: eventRuntimeRoot,
     resolvedEventRoot: resolvedPath(eventRuntimeRoot),
-    crossesReparsePoint: null
+    eventRootCrossesReparsePoint: crossesReparsePoint(eventRuntimeRoot)
   };
-  runtime.crossesReparsePoint = runtime.resolvedEventRoot === null
-    ? null
-    : resolve(runtime.resolvedEventRoot) !== resolve(eventRuntimeRoot);
 
   const headPath = join(eventRuntimeRoot, 'events', 'head.json');
   const recordsPath = join(eventRuntimeRoot, 'events', 'records');

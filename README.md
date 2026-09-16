@@ -88,14 +88,14 @@ Use the high-level launcher to route a bounded query to a provider and project s
 
 ```sh
 bun scripts/agent-context.mjs query \
-  --provider codex \
+  --provider claude-code \
   --profile custom-project \
   --project-scope \
   --query "context broker" \
   --query release
 ```
 
-Use `claude-code` for the Claude Code adapter. Commands plan changes by default. Add `--execute` only after reviewing the planned operation; an executed query writes the metadata-only audit described in the security model.
+Use `codex` for the retained Codex adapter. Commands plan changes by default. Add `--execute` only after reviewing the planned operation; an executed query writes the metadata-only audit described in the security model.
 
 ### Inventory provider metadata
 
@@ -103,7 +103,7 @@ The lower-level command inventories a bounded provider source. Keep source files
 
 ```sh
 bun src/cli.mjs inventory \
-  --provider codex \
+  --provider claude-code \
   --source <provider-source.jsonl>
 ```
 
@@ -121,7 +121,7 @@ Use peer progress for bounded updates that another related task may need while w
 
 ```sh
 bun scripts/agent-context.mjs progress \
-  --provider codex \
+  --provider claude-code \
   --proposal ./examples/peer-progress-proposal.json
 ```
 

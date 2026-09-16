@@ -20,6 +20,9 @@ import {
   persistLifecycleOutbox,
   sourceAttestation
 } from './lifecycle-events.mjs';
+import { realpathSync as resolvePhysicalPath } from 'node:fs';
+
+import { verifyEventTail } from './event-store.mjs';
 import { readPeerProgress } from './peer-progress.mjs';
 import {
   planSourceAttestation,
@@ -208,10 +211,20 @@ export function branchTicketScope(cwd) {
         // Taking the first match would let an ambiguous prompt fall back to an equally
         // ambiguous branch and inject context for the wrong task, so exactly one distinct
         // ticket is required; the same ticket repeated is fine.
+        // Project keys are letters. Allowing digits in the key made `utf-8`, `sha-256` and
+        // `v2-3` look like tickets and pre-empt the project-scope fallback. Common
+        // technical tokens that are letters-then-number are excluded explicitly, and an
+        // installation can pin the accepted project keys outright.
+        const allowed = (process.env.AGENT_CONTEXT_BROKER_TICKET_PROJECTS ?? '')
+          .split(',').map((item) => item.trim().toUpperCase()).filter(Boolean);
+        const denied = new Set(['UTF', 'SHA', 'MD', 'CRC', 'ISO', 'RFC', 'HTTP', 'TLS', 'SSL',
+          'IPV', 'ES', 'PY', 'GO', 'V', 'X', 'UTC', 'GMT', 'AES', 'RSA', 'HMAC', 'CVE']);
         const keys = new Set();
         for (const match of ref.groups.branch.toUpperCase()
-          .matchAll(/\b(?<project>[A-Z][A-Z0-9]{1,15})-(?<number>\d+)\b/gu)) {
-          keys.add(`${match.groups.project}-${match.groups.number}`);
+          .matchAll(/(?<![A-Z0-9])(?<project>[A-Z]{2,10})-(?<number>\d{1,9})(?![A-Z0-9])/gu)) {
+          const project = match.groups.project;
+          if (allowed.length > 0 ? !allowed.includes(project) : denied.has(project)) continue;
+          keys.add(`${project}-${match.groups.number}`);
         }
         return keys.size === 1 ? { kind: 'ticket', key: [...keys][0] } : null;
       }
@@ -351,13 +364,32 @@ function errorClass(error) {
   return error?.name || 'LifecycleBridgeError';
 }
 
+// Which store this hook actually read, by resolved path and head hash. The same pathname
+// has resolved to different directories from different processes on one machine, and the
+// audit trail was the one place that could have said which store the hooks saw - it
+// recorded neither. A tail read is cheap; a failure to read is itself recorded, never
+// thrown, because audit must not take context availability down with it.
+function storeIdentity(options) {
+  if (!options.eventRuntimeRoot) return null;
+  const identity = { lexicalEventRoot: options.eventRuntimeRoot, resolvedEventRoot: null, headHash: null, eventCount: null };
+  try { identity.resolvedEventRoot = resolvePhysicalPath.native ? resolvePhysicalPath.native(options.eventRuntimeRoot) : resolvePhysicalPath(options.eventRuntimeRoot); } catch { /* recorded as null */ }
+  try {
+    const tail = verifyEventTail({ runtimeRoot: options.eventRuntimeRoot, count: 1 });
+    identity.headHash = tail.head.headHash ?? null;
+    identity.eventCount = tail.head.sequence ?? null;
+  } catch (error) {
+    identity.error = error?.name ?? 'Error';
+  }
+  return identity;
+}
+
 function appendAudit(options, record) {
   try {
     const directory = join(options.runtimeRoot, 'audit');
     const timestamp = options.now.toISOString().replaceAll(':', '').replaceAll('.', '');
     atomicWrite(
       join(directory, `${timestamp}-${randomUUID()}.json`),
-      `${JSON.stringify(record)}\n`
+      `${JSON.stringify({ ...record, store: storeIdentity(options) })}\n`
     );
   } catch {
     // Context availability remains advisory when private audit storage is unavailable.

@@ -208,9 +208,23 @@ describe('peer progress', () => {
       '--agent-model', 'test-model',
       '--agent-instance', 'run-42',
       '--execute'
-    ], { encoding: 'utf8' });
-    assert.equal(result.status, 0, result.stderr);
-    const output = JSON.parse(result.stdout);
+    ], { encoding: 'utf8', env: { ...process.env, AGENT_CONTEXT_BROKER_DESCRIPTORS: undefined } });
+    // Without the explicit acknowledgement the launcher refuses: a descriptor-bearing
+    // artifact breaks every reader that predates the field, for the whole read.
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /descriptors are disabled/u);
+
+    const allowed = spawnSync(process.execPath, [sharedWrapper(), 'progress',
+      '--provider', 'codex',
+      '--proposal', proposalPath,
+      '--runtime-home', home,
+      '--agent-kind', 'subagent',
+      '--agent-model', 'test-model',
+      '--agent-instance', 'run-42',
+      '--execute'
+    ], { encoding: 'utf8', env: { ...process.env, AGENT_CONTEXT_BROKER_DESCRIPTORS: '1' } });
+    assert.equal(allowed.status, 0, allowed.stderr);
+    const output = JSON.parse(allowed.stdout);
 
     const artifact = JSON.parse(readFileSync(
       join(home, 'runtime', 'reconciliation', 'peer-progress', 'records', `${output.progressId}.json`), 'utf8'));

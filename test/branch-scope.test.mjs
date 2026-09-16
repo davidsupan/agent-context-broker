@@ -37,6 +37,27 @@ describe('branch-derived ticket scope', () => {
     assert.equal(branchTicketScope(cwd), null);
   });
 
+  test('does not mistake technical tokens for tickets', () => {
+    // These used to become "tickets" and pre-empt the project-scope fallback.
+    for (const branch of ['feature/utf-8-fix', 'chore/sha-256-hashing', 'release/v2-3', 'fix/md-5-legacy']) {
+      const cwd = tempRepository(`ref: refs/heads/${branch}`);
+      assert.equal(branchTicketScope(cwd), null, branch);
+    }
+  });
+
+  test('honours an explicit project allow-list when one is configured', () => {
+    const previous = process.env.AGENT_CONTEXT_BROKER_TICKET_PROJECTS;
+    process.env.AGENT_CONTEXT_BROKER_TICKET_PROJECTS = 'OC,APP';
+    try {
+      assert.deepEqual(branchTicketScope(tempRepository('ref: refs/heads/feature/OC-18404-x')),
+        { kind: 'ticket', key: 'OC-18404' });
+      assert.equal(branchTicketScope(tempRepository('ref: refs/heads/feature/ZZ-18404-x')), null);
+    } finally {
+      if (previous === undefined) delete process.env.AGENT_CONTEXT_BROKER_TICKET_PROJECTS;
+      else process.env.AGENT_CONTEXT_BROKER_TICKET_PROJECTS = previous;
+    }
+  });
+
   test('accepts the same ticket repeated in a branch name', () => {
     const cwd = tempRepository('ref: refs/heads/feature/OC-7-followup-OC-7');
     assert.deepEqual(branchTicketScope(cwd), { kind: 'ticket', key: 'OC-7' });

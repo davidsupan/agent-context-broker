@@ -167,12 +167,18 @@ if (options.source) {
     sourceMissing = 1;
     console.error('  NO ORIGINALS FOUND under --source ' + resolve(options.source) +
       ' for the ' + selected.length + ' checked entries; wrong directory?');
+  } else if (options.full && sourceChecked < selected.length) {
+    // A full run is the deletion gate, and a gate that covered half the originals is not
+    // a gate. Partial coverage is reported and fails; a sampled run only reports it.
+    sourceMissing = 1;
+    console.error('  INCOMPLETE SOURCE COVERAGE: only ' + sourceChecked + ' of ' + selected.length +
+      ' checked entries were present under --source; a full run must cover every entry');
   }
   console.log('source still matches  : ' + (sourceChecked - sourceDrift) + ' / ' + sourceChecked +
     ' (of ' + selected.length + ' checked entries present under --source)' +
     (sourceDrift ? ' - drifted files are NOT safe to prune from this archive' : ''));
   if (!options.full) {
-    console.log('note                  : this is a sample; only --full with --source is a deletion gate');
+    console.log('note                  : this is a sample and is not a deletion gate; only --full with --source is');
   }
 }
 

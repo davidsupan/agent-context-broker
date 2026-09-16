@@ -13,7 +13,7 @@ import {
 import { basename, dirname, join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
-import { normalizeAgentDescriptor } from './agent-identity.mjs';
+import { isStoredAgentDescriptor, normalizeAgentDescriptor } from './agent-identity.mjs';
 import { unsafeContentReason } from './content-safety.mjs';
 import {
   appendBrokerEvent,
@@ -364,6 +364,9 @@ function verifiedArtifact(runtimeRoot, event) {
       sha256(stableJson(core)) !== progressId || event.subjectRef !== `acb://progress/${progressId}` ||
       event.provider !== artifact.provider || event.taskKeyHash !== artifact.workKeyHash ||
       event.payload.actorKey !== artifact.actorKey || !event.sourceRefs.includes(artifact.sourceRef) ||
+      // A stored descriptor must still have the shape this module writes; a hand-edited
+      // record cannot smuggle prose or extra fields in through the agent field.
+      !isStoredAgentDescriptor(artifact.agent) ||
       unsafeContentReason(artifact)) {
     throw new Error('Peer progress artifact verification failed.');
   }

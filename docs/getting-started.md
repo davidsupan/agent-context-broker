@@ -176,8 +176,26 @@ quarantine so deleting the quarantine cannot delete the record of what it held.
 ## Upgrade an existing installation
 
 The installer refuses to write over recorded installation state, and that guard
-is not bypassed for upgrades. Upgrading is two explicit, plan-bound steps against
-the same runtime home, each with its own digests:
+is not bypassed for upgrades. If the existing installation has **no**
+`install-state.json` (it was written by an earlier installer, or the state was
+lost), first bring it under management without changing it. Adoption verifies
+that the tool payload is present and that each selected provider carries the
+expected handler exactly once; a handler with a different command is refused,
+not approximated:
+
+```sh
+bun scripts/manage-agent-context-broker-installation.mjs adopt \
+  --provider <provider> --runtime-home <runtime-home> > adopt-plan.json
+bun scripts/manage-agent-context-broker-installation.mjs adopt \
+  --provider <provider> --runtime-home <runtime-home> \
+  --expected-manifest-digest <manifestDigest> --expected-plan-digest <planDigest> --execute
+```
+
+An adopted installation can be removed or upgraded, but not rolled back: there
+is no pre-install state to return to.
+
+Upgrading is then two explicit, plan-bound steps against the same runtime home,
+each with its own digests:
 
 ```sh
 # 1. remove the managed files and handlers (refuses if a managed target drifted)

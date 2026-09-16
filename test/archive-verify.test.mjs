@@ -136,6 +136,24 @@ describe('corpus archiving proves recoverability per file', () => {
 });
 
 describe('the verifier fails when the archive is not actually intact', () => {
+  test('a full run with only some originals present is not a green deletion gate', () => {
+    const source = corpus(testRoot('source-partial'));
+    const target = testRoot('target-partial');
+    assert.equal(archive(source, target).status, 0);
+
+    // Half the originals moved elsewhere: the ones still present all match, and that must
+    // not read as "verified" when --full is the gate before deleting the rest.
+    rmSync(join(source, '2026', '09', 'rollout-2.jsonl'));
+    rmSync(join(source, '2026', '09', 'rollout-3.jsonl'));
+    const verify = run('verify-archive.mjs', ['--archive', target, '--source', source, '--full']);
+    assert.equal(verify.status, 1);
+    assert.match(verify.stdout + verify.stderr, /INCOMPLETE SOURCE COVERAGE: only 2 of 4/u);
+
+    // A sampled run reports the same coverage but is explicitly not the gate.
+    const sampled = run('verify-archive.mjs', ['--archive', target, '--source', source, '--sample', '4']);
+    assert.match(sampled.stdout, /not a deletion gate/u);
+  });
+
   test('a --source that matches nothing is a failure, not a clean result', () => {
     const source = corpus(testRoot('source-wrongdir'));
     const target = testRoot('target-wrongdir');

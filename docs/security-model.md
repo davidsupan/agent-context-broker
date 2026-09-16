@@ -62,12 +62,19 @@ What was observed, in the order it became known:
   into a store read by an installed tool that predates the field. That reader
   verifies every current artifact before scoping, so one unrelated artifact
   failed every query until it was superseded by a plain revision.
-- An independent review then read the same pathname from a native elevated
-  process and found it resolving through a junction into an older
-  `…\Ocean\…` tree holding a different, unforked 4,033-event chain. Two more
-  process views on the same workstation showed two further, mutually different
-  contents. No single "real store" could be established from inside the tools;
-  the operationally relevant one is whichever the hooks' processes resolve.
+- Different processes then read different contents at the same pathname. The
+  mechanism is **MSIX AppData virtualization**: the packaged desktop agent and
+  every process it spawns — its tools, Bun, and therefore the agents' lifecycle
+  hooks — have `%LOCALAPPDATA%` writes redirected into the package's
+  `Packages\<app>\LocalCache\Local\…` tree, and `doctor` run from such a process
+  reports that path as the resolved root. A native, non-elevated shell on the
+  same machine saw the unvirtualised directory: a `head.json` committing to the
+  foreign four-event genesis and an empty records directory, i.e. a broken store
+  that no agent reads. An elevated process reported a junction into an older
+  `…\Ocean\…` tree holding a third, unforked 4,033-event chain. None of these is
+  "the" store; the one that matters operationally is the one the hooks' process
+  kind resolves, and the fix is to bind identity to the resolved path and head
+  hash — or to move the runtime home out of the virtualised area altogether.
 
 Conclusions that hold regardless of which view is called real: the pathname
 does not identify the store; identity is the resolved path **and** the head

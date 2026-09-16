@@ -126,6 +126,18 @@ function pushValue(args, name, value) {
 // nothing on the caller's behalf, and an absent descriptor keeps artifacts readable by
 // readers that predate the field.
 function pushAgentArguments(args, options) {
+  const declared = [options.agentKind, options.agentModel, options.agentHarness, options.agentInstance]
+    .some((value) => value !== undefined && value !== null && value !== '');
+  if (!declared) return;
+  // A descriptor-bearing artifact is rejected wholesale by any reader that predates the
+  // field, and that reader throws for the entire peer-progress read, not just this item.
+  // Until every reader on the machine is upgraded, declaring one is an outage one flag
+  // away, so it needs an explicit, environment-level acknowledgement.
+  if (process.env.AGENT_CONTEXT_BROKER_DESCRIPTORS !== '1') {
+    throw new Error('Caller descriptors are disabled: readers that predate the agent field reject ' +
+      'descriptor-bearing artifacts for the whole read. Set AGENT_CONTEXT_BROKER_DESCRIPTORS=1 ' +
+      'only once every installed reader has been upgraded.');
+  }
   pushValue(args, '--agent-kind', options.agentKind);
   pushValue(args, '--agent-model', options.agentModel);
   pushValue(args, '--agent-harness', options.agentHarness);

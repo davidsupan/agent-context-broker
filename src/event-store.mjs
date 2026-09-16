@@ -309,11 +309,21 @@ export function verifyEventStore(inputOptions = {}) {
 
 function verifyEventRecords(runtimeRoot) {
   const events = [];
+  const keys = new Set();
   let previousEventHash = null;
   for (const [index, path] of recordFiles(runtimeRoot).entries()) {
     const event = JSON.parse(readFileSync(path, 'utf8'));
     const expectedSequence = index + 1;
     validateStoredEvent(event, path, expectedSequence, previousEventHash);
+    // An idempotency key is a promise that the event exists once. A duplicate on the
+    // chain means a replay was appended instead of acknowledged - the exact failure a
+    // foreign or fabricated index produces - and it must fail verification rather than
+    // pass as a well-formed chain that happens to say the same thing twice.
+    if (keys.has(event.idempotencyKey)) {
+      throw new Error('Broker event chain holds the same idempotency key twice (sequences ' +
+        `${keys.size === 0 ? '?' : events.find((e) => e.idempotencyKey === event.idempotencyKey)?.sequence} and ${expectedSequence}).`);
+    }
+    keys.add(event.idempotencyKey);
     events.push(event);
     previousEventHash = event.eventId;
   }
@@ -397,21 +407,51 @@ function indexPath(runtimeRoot) {
   return join(resolve(runtimeRoot), 'events', 'idempotency.jsonl');
 }
 
+// The index is bound to the chain it describes by a sidecar naming the tip event and the
+// row count. An index copied in from another tree - plausible when whole runtime
+// directories get duplicated - is well formed, has the right shape for its own chain,
+// and would otherwise be trusted here; its tip eventId cannot match this chain's.
+function indexBindingPath(runtimeRoot) {
+  return join(resolve(runtimeRoot), 'events', 'idempotency.head.json');
+}
+
+function writeIndexBinding(runtimeRoot, headEventId, count) {
+  atomicWrite(indexBindingPath(runtimeRoot), stableJson({ headEventId, count }) + '\n');
+}
+
 function rebuildIdempotencyIndex(runtimeRoot) {
   const index = new Map();
   const lines = [];
+  let headEventId = null;
   for (const path of recordFiles(runtimeRoot)) {
     const event = JSON.parse(readFileSync(path, 'utf8'));
     index.set(event.idempotencyKey, event.sequence);
     lines.push(stableJson({ idempotencyKey: event.idempotencyKey, sequence: event.sequence }));
+    headEventId = event.eventId;
   }
   atomicWrite(indexPath(runtimeRoot), lines.length > 0 ? lines.join('\n') + '\n' : '');
+  writeIndexBinding(runtimeRoot, headEventId, lines.length);
   return index;
 }
 
-function readIdempotencyIndex(runtimeRoot, expectedSequence) {
+function readIdempotencyIndex(runtimeRoot, head) {
+  const expectedSequence = head.sequence;
   const path = indexPath(runtimeRoot);
   if (!existsSync(path)) return rebuildIdempotencyIndex(runtimeRoot);
+  // Binding first: the sidecar must name this chain's tip. An index copied from another
+  // tree passes every shape check below for its own chain and would otherwise be trusted;
+  // its tip cannot match ours. No sidecar means an index written before bindings existed,
+  // which is rebuilt once.
+  try {
+    const bindingPath = indexBindingPath(runtimeRoot);
+    if (!existsSync(bindingPath)) return rebuildIdempotencyIndex(runtimeRoot);
+    const binding = JSON.parse(readFileSync(bindingPath, 'utf8'));
+    if (binding.headEventId !== (head.eventId ?? null) || binding.count !== expectedSequence) {
+      return rebuildIdempotencyIndex(runtimeRoot);
+    }
+  } catch {
+    return rebuildIdempotencyIndex(runtimeRoot);
+  }
   const index = new Map();
   const sequences = new Set();
   let highest = 0;
@@ -447,7 +487,7 @@ function readIdempotencyIndex(runtimeRoot, expectedSequence) {
   return index;
 }
 
-function appendIdempotencyEntries(runtimeRoot, entries) {
+function appendIdempotencyEntries(runtimeRoot, entries, headEventId, totalCount) {
   if (entries.length === 0) return;
   const path = indexPath(runtimeRoot);
   const payload = entries
@@ -455,6 +495,7 @@ function appendIdempotencyEntries(runtimeRoot, entries) {
     .join('\n') + '\n';
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, payload, { encoding: 'utf8', flag: 'a' });
+  writeIndexBinding(runtimeRoot, headEventId, totalCount);
 }
 
 // Verifying the whole chain before every write is what made appends quadratic. The
@@ -550,7 +591,7 @@ export async function appendBrokerEvents(inputOptions = {}) {
   const root = resolve(options.runtimeRoot);
   return withLock(join(root, 'events', 'event-store.lock'), options, async () => {
     const { head } = verifyEventTip(root);
-    const index = readIdempotencyIndex(root, head.sequence);
+    const index = readIdempotencyIndex(root, head);
 
     const recordedAt = options.now
       ? new Date(options.now).toISOString()
@@ -598,7 +639,7 @@ export async function appendBrokerEvents(inputOptions = {}) {
       // One head publication for the whole batch: the head only ever describes the
       // newest event, so a batch and a sequence of single appends commit the same tip.
       writeJson(join(root, 'events', 'head.json'), expectedHead(appended));
-      appendIdempotencyEntries(root, appended);
+      appendIdempotencyEntries(root, appended, appended.at(-1).eventId, sequence);
     }
     return results;
   });
