@@ -83,6 +83,22 @@ a records directory with two files for one sequence is a parallel chain, named
 as such; and a hook must not start a genesis once receipts exist. Nothing in
 this record authorises merging, re-ingesting, or deleting either tree.
 
+## Caller descriptors and reader compatibility
+
+A caller descriptor is self-declared metadata and never authorization. It is also
+a compatibility boundary: a reader that predates the `agent` field rejects an
+entire read when it meets an artifact that carries one, so a single descriptor
+artifact can blind every un-upgraded reader in a fleet. Artifacts written without
+a declared descriptor carry no `agent` key at all, which is what keeps mixed
+fleets working.
+
+The `AGENT_CONTEXT_BROKER_DESCRIPTORS` switch is an operational safeguard in the
+launcher, not a security control: it refuses the descriptor flags unless the
+operator has opted in. The library and `src/cli.mjs` do not enforce it, so a
+second wrapper that skips the check can still declare descriptors. Treat the
+switch as a deployment gate to be lifted once every installed reader is upgraded
+and rollback is no longer wanted, and audit any other wrapper for the same check.
+
 ## Responsible disclosure
 
 Do not open a public issue for a suspected vulnerability that contains secrets,

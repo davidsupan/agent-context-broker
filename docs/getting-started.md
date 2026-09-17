@@ -145,10 +145,21 @@ implicit project routing.
 | `AGENT_CONTEXT_BROKER_REVIEW_LEDGERS_ROOT` | Optional review metadata root |
 | `AGENT_CONTEXT_BROKER_RECONCILIATION_RUNTIME` | Override the reconciliation root (defaults below the runtime home) |
 | `AGENT_CONTEXT_BROKER_EVENT_RUNTIME` | Override the event-store root (defaults below the runtime home) |
+| `AGENT_CONTEXT_BROKER_DESCRIPTORS=1` | Allow the launcher to pass caller descriptor flags (off by default) |
+| `AGENT_CONTEXT_BROKER_TICKET_PROJECTS` | Allow-list of ticket project keys for branch-derived scope |
 
 Caller descriptors are supplied explicitly with `--agent-kind`, `--agent-model`,
 `--agent-harness` and `--agent-instance` on `progress`, `publish` and `query`.
 No environment variable populates them automatically.
+
+An artifact that carries a descriptor is unreadable to a reader older than the
+release that added the `agent` field: such a reader rejects the whole read, not
+just that artifact. The launcher therefore refuses the descriptor flags unless
+`AGENT_CONTEXT_BROKER_DESCRIPTORS=1` is set, so a fleet upgrades readers first and
+declares callers second. Keep it unset until every installed reader is upgraded
+and rolling back is off the table. The gate lives in the launcher
+(`scripts/agent-context.mjs`) as an operational safeguard; calling `src/cli.mjs`
+directly bypasses it, so any other wrapper must make the same check itself.
 
 ## Backfill history
 

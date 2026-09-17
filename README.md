@@ -4,7 +4,7 @@ Agent Context Broker is a local-first, provider-neutral open-source beta for sha
 
 The repository contains a provider-neutral core, schemas, and optional provider bridges. Its current adapters are for Claude Code and Codex; Claude Code is the operational provider, and the Codex adapter is retained for parity (see [Providers](#providers)).
 
-> **Beta:** `0.10.0-beta.7` is the current source version. The API and storage contracts can change while the project is being evaluated.
+> **Beta:** `0.11.0-beta.1` is the current source version. The API and storage contracts can change while the project is being evaluated.
 
 Visit the [Agent Context Broker project site](https://davidsupan.github.io/agent-context-broker/) for a visual introduction, or continue below for the complete technical overview.
 
@@ -127,7 +127,7 @@ bun scripts/agent-context.mjs progress \
 
 Progress is immutable, time-limited, and explicitly labeled unverified. The example is a shape to adapt to the current task, not a substitute for checking the proposal and its scope.
 
-Add `--agent-kind`, `--agent-model`, `--agent-harness`, and `--agent-instance` to record which agent published a checkpoint or read context. The descriptor is stored as self-declared description with a hashed instance id; it never acts as authorization, and an artifact written without one carries no `agent` key, so older readers keep working.
+Add `--agent-kind`, `--agent-model`, `--agent-harness`, and `--agent-instance` to record which agent published a checkpoint or read context. The descriptor is stored as self-declared description with a hashed instance id; it never acts as authorization, and an artifact written without one carries no `agent` key, so older readers keep working. A reader older than 0.11.0-beta.1 rejects an entire read when it meets an artifact that does carry the key, so the launcher refuses these flags unless `AGENT_CONTEXT_BROKER_DESCRIPTORS=1` is set: upgrade every reader in a fleet before declaring callers anywhere. See [Runtime configuration](docs/getting-started.md#runtime-configuration).
 
 ### How a query resolves its scope
 
@@ -197,7 +197,7 @@ Bridge packages live under [`providers/`](providers/). Validate the checkout and
 
 ## Beta status
 
-This is an early public beta. The current source version is `0.10.0-beta.7`; APIs, storage formats, provider bridges, and platform coverage are still subject to change. The repository is suitable for evaluation and focused integration work, but integrations should review the contracts and security behavior before relying on them.
+This is an early public beta. The current source version is `0.11.0-beta.1`; APIs, storage formats, provider bridges, and platform coverage are still subject to change. The repository is suitable for evaluation and focused integration work, but integrations should review the contracts and security behavior before relying on them.
 
 Security fixes are supported on the latest published revision only. See [`SECURITY.md`](SECURITY.md) for responsible disclosure guidance.
 
