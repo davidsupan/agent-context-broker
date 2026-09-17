@@ -46,7 +46,10 @@ rather than a single exact key.
   readable while working one of its tickets. It adds exactly one project scope,
   taken from configuration (`AGENT_CONTEXT_BROKER_DEFAULT_PROJECT`, or
   `--ambient-project`), never from prompt text, and a project-scoped query does
-  not widen further.
+  not widen further. An accepted claim from the ambient project surfaces without
+  a term match, because standing practice is exactly what the narrow scope
+  lacks; live peer progress from it needs a term match, because it is another
+  agent's current work rather than a rule.
 - Relation expansion is enrichment, never a gate. A missing or unreadable ledger
   removes related scopes but never the primary one, and a snapshot must still
   carry a relation the query accepts before it is verified and read.

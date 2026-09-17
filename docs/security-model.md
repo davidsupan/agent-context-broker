@@ -95,9 +95,14 @@ The widening stays a gate rather than a hole. It adds exactly one scope, always
 of kind project, only to a scope narrower than a project, and the key comes from
 operator configuration or an explicit flag, never from prompt text, a transcript,
 or any other untrusted input. A query already at project scope does not widen.
-Claims of a different project remain unreachable. Term filtering still applies to
-everything the ambient project contributes, so a narrow query does not fill with
-unrelated project material.
+Claims of a different project remain unreachable, and term filtering still
+applies to everything the ambient project contributes.
+
+Claims and live progress differ here, deliberately. A standing claim recorded at
+the project is what a narrow query is missing, so it surfaces without a term
+match. Live progress published against the project is another agent's current
+work, which would drown a ticket query if it always appeared, so it reaches a
+narrow scope only when a query term matches it.
 
 ## Caller descriptors and reader compatibility
 
