@@ -49,7 +49,7 @@
             <h1 id="hero-title">Agent Context Broker</h1>
             <p class="hero-statement">Small, source-linked context between coding agents.</p>
             <p class="lede">
-              Turn bounded decisions into queryable context for another coding agent. Codex and Claude Code adapters are available; conversations remain private source material.
+              Turn bounded decisions into queryable context for another coding agent. A Claude Code adapter is in operational use and a Codex adapter is retained for parity; conversations remain private source material.
             </p>
             <div class="hero-actions">
               <a class="button button-primary" href="https://github.com/davidsupan/agent-context-broker/blob/main/docs/getting-started.md">Get started</a>
@@ -68,7 +68,7 @@
             <p>Accepted claims and short-lived peer progress stay visibly separate, with the source and verification state carried alongside the value.</p>
           </div>
           <dl class="facts" aria-label="Project facts">
-            <div><dt>Version</dt><dd>0.10.0-beta.7</dd></div>
+            <div><dt>Version</dt><dd>0.11.0-beta.1</dd></div>
             <div><dt>License</dt><dd>Apache-2.0</dd></div>
             <div><dt>Runtime</dt><dd>Bun 1.4.x</dd></div>
             <div><dt>Platforms</dt><dd>Windows, Linux, macOS 13+</dd></div>
@@ -90,7 +90,7 @@
                     <tr><th scope="col">Key</th><th scope="col">Value</th><th scope="col">Provider</th><th scope="col">Source hash</th></tr>
                   </thead>
                   <tbody>
-                    <tr class="brief-row"><th scope="row">release.tag</th><td>v0.10.0-beta.7</td><td>codex</td><td>3f9c...e21a</td></tr>
+                    <tr class="brief-row"><th scope="row">release.tag</th><td>v0.11.0-beta.1</td><td>codex</td><td>3f9c...e21a</td></tr>
                     <tr class="brief-row"><th scope="row">ci.required-checks</th><td>linux, windows, macos</td><td>claude-code</td><td>8b1d...77f0</td></tr>
                     <tr class="brief-row"><th scope="row">install.mode</th><td>plan-only by default</td><td>codex</td><td>c04e...9a53</td></tr>
                   </tbody>
@@ -146,7 +146,7 @@
                 <li>native session, record, and source identifiers</li>
                 <li>credentials and secret-like values rejected by content safety</li>
               </ul>
-              <p><strong>Adapters are read-only.</strong> They never modify, archive, or delete native histories.</p>
+              <p><strong>Adapters are read-only.</strong> They never modify, archive, or delete native histories. Corpus archiving and pruning are separate, explicitly invoked scripts that keep a per-file restore proof and never delete anything on their own.</p>
             </div>
           </div>
         </div>
@@ -165,8 +165,8 @@
             <li><strong>Inventory or propose</strong><span>An adapter inventories bounded metadata or submits a structured proposal.</span></li>
             <li><strong>Validate</strong><span>The core checks paths, schemas, source attestation, content safety, freshness, and expected state.</span></li>
             <li><strong>Reconcile</strong><span>A claim becomes accepted context, stays pending, or is rejected with a reason.</span></li>
-            <li><strong>Route</strong><span>A query returns the smallest matching accepted context and labels peer progress separately.</span></li>
-            <li><strong>Audit</strong><span>Metadata-only records capture hashes, counts, and dispositions without conversation content.</span></li>
+            <li><strong>Route</strong><span>A query returns the smallest matching accepted context and labels peer progress separately. Scope resolves as a small graph, so a claim on a parent ticket is visible while working its child.</span></li>
+            <li><strong>Audit</strong><span>Metadata-only records capture hashes, counts, dispositions, and which agent read the context, without conversation content.</span></li>
           </ol>
           <p class="rule-note"><strong>Availability fails open.</strong> An unavailable broker does not block the agent. <strong>Integrity fails closed.</strong> Invalid data is never imported or promoted.</p>
         </div>
@@ -177,23 +177,24 @@
           <div class="section-heading">
             <p class="section-index" aria-hidden="true">04</p>
             <div>
-              <h2 id="kinds-title">Two kinds of context, kept apart</h2>
+              <h2 id="kinds-title">Three kinds of context, kept apart</h2>
               <p>Accepted means a claim passed reconciliation and integrity checks. It does not mean the claim is guaranteed to be factually true.</p>
             </div>
           </div>
           <div class="table-scroll" role="region" aria-label="Context type comparison" tabindex="0">
             <table class="comparison">
-              <caption class="visually-hidden">Accepted context compared with live peer progress</caption>
-              <thead><tr><th scope="col">Property</th><th scope="col"><span class="marker marker-accepted" aria-hidden="true"></span>Accepted context</th><th scope="col"><span class="marker marker-progress" aria-hidden="true"></span>Live peer progress</th></tr></thead>
+              <caption class="visually-hidden">Accepted context compared with live peer progress and the model-assisted review lane</caption>
+              <thead><tr><th scope="col">Property</th><th scope="col"><span class="marker marker-accepted" aria-hidden="true"></span>Accepted context</th><th scope="col"><span class="marker marker-progress" aria-hidden="true"></span>Live peer progress</th><th scope="col"><span class="marker marker-review" aria-hidden="true"></span>Model-assisted lane</th></tr></thead>
               <tbody>
-                <tr><th scope="row">Purpose</th><td>Durable facts another agent can build on</td><td>Coordination hints while related work is in flight</td></tr>
-                <tr><th scope="row">Entry path</th><td>Structured candidate claim reconciled against the current snapshot</td><td>Immutable progress publication from a task</td></tr>
-                <tr><th scope="row">Checks</th><td>Schema, content safety, evidence, freshness, expected state, and hashes</td><td>Schema and content safety; never reconciled</td></tr>
-                <tr><th scope="row">Label</th><td>Accepted</td><td>Always unverified</td></tr>
-                <tr><th scope="row">Lifetime</th><td>Until replaced by a reconciled successor</td><td>Expires by time to live</td></tr>
+                <tr><th scope="row">Purpose</th><td>Durable facts another agent can build on</td><td>Coordination hints while related work is in flight</td><td>Conclusions extracted from transcripts, awaiting a human</td></tr>
+                <tr><th scope="row">Entry path</th><td>Structured candidate claim reconciled against the current snapshot</td><td>Immutable progress publication from a task</td><td>Extracted candidate forced to agent-handoff and unverified</td></tr>
+                <tr><th scope="row">Checks</th><td>Schema, content safety, evidence, freshness, expected state, and hashes</td><td>Schema and content safety; never reconciled</td><td>Held for evidence review; never injected as context</td></tr>
+                <tr><th scope="row">Label</th><td>Accepted</td><td>Always unverified</td><td>Always unverified</td></tr>
+                <tr><th scope="row">Lifetime</th><td>Until replaced by a reconciled successor</td><td>Expires by time to live</td><td>Until promoted with checkable evidence, or discarded</td></tr>
               </tbody>
             </table>
           </div>
+          <p class="rule-note">Promotion out of the model-assisted lane means resubmitting a claim with canonical-artifact or observed-tool-result evidence the broker can check. An extractor cannot promote its own output by asserting that it verified itself.</p>
         </div>
       </section>
 
@@ -208,6 +209,9 @@
             <div><dt>Strict isolation</dt><dd><code>AGENT_CONTEXT_BROKER_STRICT_ISOLATION=1</code> returns before registry reads or audit writes.</dd></div>
             <div><dt>Provenance</dt><dd>Claims carry source hashes. Accepted snapshots are content-addressed and hashes are checked again on read.</dd></div>
             <div><dt>Metadata-only audit</dt><dd>Audit records contain hashes, counts, watermarks, warnings, and dispositions, never prompts or responses.</dd></div>
+            <div><dt>Caller identity</dt><dd>Progress and audits can record the publishing agent: kind, harness, model, and a hashed instance id. It is self-declared and descriptive, so it never raises confidence, changes acceptance, or outranks another actor.</dd></div>
+            <div><dt>One runtime home</dt><dd>The live store is whatever <code>AGENT_CONTEXT_BROKER_HOME</code> resolves to. <code>doctor</code> names the store it verified, so a healthy-looking runtime nobody reads cannot be mistaken for the live one.</dd></div>
+            <div><dt>Recovery without rewriting</dt><dd>A second genesis written beside the real chain is reported as a parallel chain, by sequence; hooks cannot start a chain once receipts exist. Repair moves foreign records aside and never rewrites the committed head.</dd></div>
           </dl>
         </div>
       </section>
@@ -238,7 +242,7 @@ bun scripts/manage-agent-context-broker-installation.mjs install \
             <p class="section-index" aria-hidden="true">07</p>
             <div>
               <h2 id="adapters-title">Adapters and platforms</h2>
-              <p>Codex and Claude Code adapters translate provider lifecycle input into the same provider-neutral command surface. Other providers are not advertised as supported by this beta.</p>
+              <p>The Claude Code adapter (operational) and the Codex adapter (retained for parity, not in operational use since 2026-09-15) translate provider lifecycle input into the same provider-neutral command surface. Other providers are not advertised as supported by this beta.</p>
             </div>
           </div>
           <div class="table-scroll" role="region" aria-label="Runtime and platform support" tabindex="0">

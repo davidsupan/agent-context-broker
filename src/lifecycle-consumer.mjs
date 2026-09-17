@@ -16,9 +16,13 @@ import { pathToFileURL } from 'node:url';
 
 import {
   deliverLifecycleOutbox,
+  observedAtFor,
   persistLifecycleOutbox,
   sourceAttestation
 } from './lifecycle-events.mjs';
+import { realpathSync as resolvePhysicalPath } from 'node:fs';
+
+import { verifyEventTail } from './event-store.mjs';
 import { readPeerProgress } from './peer-progress.mjs';
 import {
   planSourceAttestation,
@@ -179,6 +183,61 @@ function advisoryFor(deltas, snapshots, sourceToken, threadRef) {
   return `Context broker advisory: ${parts.join('; ')}. For context-aware work, invoke the installed broker integration, retrieve the narrowest accepted context profile, and publish bounded progress after material findings, blockers, validation changes, and final handoff. No raw peer conversation content was imported. Verify candidate state against canonical sources before acting.`;
 }
 
+export function branchTicketScope(cwd) {
+  // The branch name is the most reliable work signal on a per-ticket-worktree machine,
+  // and it is already captured as a hashed relation. Derive scope from it when the
+  // prompt is silent or ambiguous. Never throws: scope derivation is best-effort.
+  try {
+    const start = typeof cwd === 'string' && cwd.trim() ? resolve(cwd) : null;
+    if (!start) return null;
+    let directory = start;
+    for (let depth = 0; depth < 24; depth += 1) {
+      const gitPath = join(directory, '.git');
+      if (existsSync(gitPath)) {
+        let gitDirectory = gitPath;
+        if (statSync(gitPath).isFile()) {
+          // worktree or submodule: .git is a file containing "gitdir: <path>"
+          const pointer = readFileSync(gitPath, 'utf8').slice(0, 1024).trim();
+          const target = /^gitdir:\s*(?<path>.+)$/u.exec(pointer);
+          if (!target) return null;
+          gitDirectory = resolve(directory, target.groups.path.trim());
+        }
+        const headPath = join(gitDirectory, 'HEAD');
+        if (!existsSync(headPath)) return null;
+        const head = readFileSync(headPath, 'utf8').slice(0, 512).trim();
+        const ref = /^ref:\s*refs\/heads\/(?<branch>.+)$/u.exec(head);
+        if (!ref) return null;
+        // A branch naming two different tickets is as ambiguous as a prompt naming two.
+        // Taking the first match would let an ambiguous prompt fall back to an equally
+        // ambiguous branch and inject context for the wrong task, so exactly one distinct
+        // ticket is required; the same ticket repeated is fine.
+        // Project keys are letters. Allowing digits in the key made `utf-8`, `sha-256` and
+        // `v2-3` look like tickets and pre-empt the project-scope fallback. Common
+        // technical tokens that are letters-then-number are excluded explicitly, and an
+        // installation can pin the accepted project keys outright.
+        const allowed = (process.env.AGENT_CONTEXT_BROKER_TICKET_PROJECTS ?? '')
+          .split(',').map((item) => item.trim().toUpperCase()).filter(Boolean);
+        const denied = new Set(['UTF', 'SHA', 'MD', 'CRC', 'ISO', 'RFC', 'HTTP', 'TLS', 'SSL',
+          'IPV', 'ES', 'PY', 'GO', 'V', 'X', 'UTC', 'GMT', 'AES', 'RSA', 'HMAC', 'CVE']);
+        const keys = new Set();
+        for (const match of ref.groups.branch.toUpperCase()
+          .matchAll(/(?<![A-Z0-9])(?<project>[A-Z]{2,10})-(?<number>\d{1,9})(?![A-Z0-9])/gu)) {
+          const project = match.groups.project;
+          if (allowed.length > 0 ? !allowed.includes(project) : denied.has(project)) continue;
+          keys.add(`${project}-${match.groups.number}`);
+        }
+        return keys.size === 1 ? { kind: 'ticket', key: [...keys][0] } : null;
+      }
+      const parent = dirname(directory);
+      if (parent === directory) return null;
+      directory = parent;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 function safeScopeFromHookEvent(event, defaultProjectKey = null) {
   const prompt = typeof event?.prompt === 'string' && event.prompt.length <= MAX_HOOK_PROMPT_LENGTH
     ? event.prompt
@@ -195,24 +254,26 @@ function safeScopeFromHookEvent(event, defaultProjectKey = null) {
     reviewKeys.add(`${match.groups.project}!${match.groups.iid}`);
   }
   if (reviewKeys.size === 1) return { kind: 'merge-request', key: [...reviewKeys][0] };
-  if (reviewKeys.size > 1) return null;
+  if (reviewKeys.size > 1) return branchTicketScope(event?.cwd);
 
   const issueKeys = [...new Set(
     [...prompt.matchAll(/\b[A-Z][A-Z0-9]{1,15}-\d+\b/gu)].map((match) => match[0].toUpperCase())
   )];
   if (issueKeys.length === 1) return { kind: 'ticket', key: issueKeys[0] };
-  if (issueKeys.length > 1) return null;
+  if (issueKeys.length > 1) return branchTicketScope(event?.cwd);
 
   const workstreamKeys = [...new Set(
     [...prompt.matchAll(/\bworkstream(?:\s+|:\s*)([A-Za-z0-9](?:[A-Za-z0-9._:/!-]{0,126}[A-Za-z0-9])?)/giu)]
       .map((match) => match[1])
   )];
   if (workstreamKeys.length === 1) return { kind: 'workstream', key: workstreamKeys[0] };
-  if (workstreamKeys.length > 1) return null;
+  if (workstreamKeys.length > 1) return branchTicketScope(event?.cwd);
 
   const cwdMatch = /(?:^|[\\/])(?<project>[A-Z][A-Z0-9]{1,15})[-_](?<number>\d+)(?:[\\/]|$)/u
     .exec(String(event?.cwd ?? ''));
   if (cwdMatch) return { kind: 'ticket', key: `${cwdMatch.groups.project}-${cwdMatch.groups.number}` };
+  const branchScope = branchTicketScope(event?.cwd);
+  if (branchScope) return branchScope;
   if (defaultProjectKey && prompt.trim()) return { kind: 'project', key: defaultProjectKey };
   return null;
 }
@@ -247,6 +308,7 @@ function naturalPeerProgress(event, options) {
       crossProvider: true,
       scopeKind: scope.kind,
       scopeKey: scope.key,
+      ambientProjectKey: options.defaultProjectKey ?? null,
       terms: safeTermsFromHookEvent(event),
       now: options.now,
       maxProgress: 3
@@ -303,13 +365,32 @@ function errorClass(error) {
   return error?.name || 'LifecycleBridgeError';
 }
 
+// Which store this hook actually read, by resolved path and head hash. The same pathname
+// has resolved to different directories from different processes on one machine, and the
+// audit trail was the one place that could have said which store the hooks saw - it
+// recorded neither. A tail read is cheap; a failure to read is itself recorded, never
+// thrown, because audit must not take context availability down with it.
+function storeIdentity(options) {
+  if (!options.eventRuntimeRoot) return null;
+  const identity = { lexicalEventRoot: options.eventRuntimeRoot, resolvedEventRoot: null, headHash: null, eventCount: null };
+  try { identity.resolvedEventRoot = resolvePhysicalPath.native ? resolvePhysicalPath.native(options.eventRuntimeRoot) : resolvePhysicalPath(options.eventRuntimeRoot); } catch { /* recorded as null */ }
+  try {
+    const tail = verifyEventTail({ runtimeRoot: options.eventRuntimeRoot, count: 1 });
+    identity.headHash = tail.head.headHash ?? null;
+    identity.eventCount = tail.head.sequence ?? null;
+  } catch (error) {
+    identity.error = error?.name ?? 'Error';
+  }
+  return identity;
+}
+
 function appendAudit(options, record) {
   try {
     const directory = join(options.runtimeRoot, 'audit');
     const timestamp = options.now.toISOString().replaceAll(':', '').replaceAll('.', '');
     atomicWrite(
       join(directory, `${timestamp}-${randomUUID()}.json`),
-      `${JSON.stringify(record)}\n`
+      `${JSON.stringify({ ...record, store: storeIdentity(options) })}\n`
     );
   } catch {
     // Context availability remains advisory when private audit storage is unavailable.
@@ -473,7 +554,10 @@ export function createLifecycleConsumer(inputDefinition) {
               attestation: sourceAttestation(
                 definition.provider,
                 currentSource,
-                inventoryResult.inventory.generatedAt
+                // Must match the observed time the outbox attests with, or the planned
+                // token and the delivered attestation hash differently and the advisory
+                // silently drops its source token.
+                observedAtFor(currentSource, inventoryResult.inventory.generatedAt)
               )
             })
           : null;

@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
-import { appendBrokerEvent, sha256, stableJson } from './event-store.mjs';
+import { appendBrokerEvents, sha256, stableJson, verifyEventTail } from './event-store.mjs';
 import { attestSource, planSourceAttestation } from './source-attestation.mjs';
 
 export function sourceAttestation(provider, source, observedAt) {
@@ -54,10 +54,22 @@ function deltaEvent(provider, delta, source, attestation, observedAt) {
   };
 }
 
+// Valid time is a property of the source, not of the run that happened to read it.
+// Using the run timestamp collapses an entire ingested history into one instant, which
+// makes months-old threads look freshly observed; a backfill then outranks current
+// context. The source's own newest record is the honest answer, and for a live session
+// it is seconds old, so live behaviour is unchanged.
+export function observedAtFor(source, fallback) {
+  const candidate = source?.lastEventAt;
+  return typeof candidate === 'string' && !Number.isNaN(Date.parse(candidate))
+    ? new Date(candidate).toISOString()
+    : fallback;
+}
+
 export function lifecycleOutboxEntry(inventory, deltas) {
   const sources = new Map(inventory.sources.map((source) => [source.sourceId, source]));
   const attestations = inventory.sources.map((source) =>
-    sourceAttestation(inventory.provider, source, inventory.generatedAt)
+    sourceAttestation(inventory.provider, source, observedAtFor(source, inventory.generatedAt))
   );
   const bySource = new Map(attestations.map((item, index) => [
     inventory.sources[index].sourceId,
@@ -73,7 +85,7 @@ export function lifecycleOutboxEntry(inventory, deltas) {
       delta,
       sources.get(delta.sourceId),
       bySource.get(delta.sourceId),
-      inventory.generatedAt
+      observedAtFor(sources.get(delta.sourceId), inventory.generatedAt)
     ))
   };
 }
@@ -91,11 +103,44 @@ export function persistLifecycleOutbox(inputOptions) {
   return path;
 }
 
+// A receipt proves that a chain existed only through its content: the events it delivered
+// or the head it left behind. A file name alone is not evidence - a receipt for an entry
+// that delivered nothing says nothing about the store - while a receipt that cannot be
+// read is treated as proof, because failing closed is the whole point of this guard.
+function receiptsProveChain(deliveredRoot) {
+  if (!existsSync(deliveredRoot)) return false;
+  return readdirSync(deliveredRoot).some((name) => {
+    if (!/^[a-f0-9]{64}\.json$/u.test(name)) return false;
+    try {
+      const receipt = JSON.parse(readFileSync(join(deliveredRoot, name), 'utf8'));
+      return typeof receipt?.headEventId === 'string' ||
+        (Array.isArray(receipt?.eventIds) && receipt.eventIds.length > 0);
+    } catch {
+      return true;
+    }
+  });
+}
+
 export async function deliverLifecycleOutbox(inputOptions) {
   const lifecycleRoot = resolve(inputOptions.lifecycleRuntimeRoot);
   const pendingRoot = join(lifecycleRoot, 'event-outbox', 'pending');
   if (!existsSync(pendingRoot)) {
     return { deliveredEntries: 0, deliveredEvents: 0, attestedSubjectRefs: [] };
+  }
+  // The first hook run after activation legitimately seeds an empty store. What is never
+  // legitimate is an empty store *after this lifecycle has already delivered events*: a
+  // delivered receipt proves the chain existed, so a missing head now means the hook is
+  // looking at the wrong or a partially visible directory, not at a fresh store. That is
+  // exactly how a second genesis got written beside the real chain and failed verification
+  // for every reader. Refuse and leave the outbox pending; a deliberate rebuild opts in.
+  const deliveredRoot = join(lifecycleRoot, 'event-outbox', 'delivered');
+  if (receiptsProveChain(deliveredRoot) && inputOptions.allowGenesis !== true) {
+    const tip = verifyEventTail({ runtimeRoot: inputOptions.eventRuntimeRoot, count: 1 });
+    if (tip.head.sequence === 0) {
+      throw new Error('Lifecycle delivery refused to start a new event chain: this lifecycle has ' +
+        'delivered events before, but the event store now shows no committed head. The store ' +
+        'is most likely not the one you think it is. Pass allowGenesis only for a deliberate rebuild.');
+    }
   }
   mkdirSync(join(lifecycleRoot, 'event-outbox', 'delivered'), { recursive: true });
   let deliveredEntries = 0;
@@ -118,20 +163,27 @@ export async function deliverLifecycleOutbox(inputOptions) {
       eventIds.push(result.eventId);
       attestedSubjectRefs.add(result.subjectRef);
     }
-    for (const event of outbox.events) {
-      const result = await appendBrokerEvent({
+    if (outbox.events.length > 0) {
+      // One batch per outbox entry: delivery is the path a historical backfill takes,
+      // and appending per event made that cost grow with the store.
+      const results = await appendBrokerEvents({
         runtimeRoot: inputOptions.eventRuntimeRoot,
-        event,
+        events: outbox.events,
         execute: true
       });
-      eventIds.push(result.eventId);
-      deliveredEvents += 1;
+      for (const result of results) {
+        eventIds.push(result.eventId);
+        deliveredEvents += 1;
+      }
     }
+    // The receipt names the events it delivered and the chain head it left behind, so a
+    // later run can tell a receipt that proves a chain from one that delivered nothing.
     inputOptions.atomicWriter(receiptPath, `${JSON.stringify({
       schemaVersion: 1,
       runIdHash: sha256(outbox.runId),
       inventoryHash: outbox.inventoryHash,
-      eventIds
+      eventIds,
+      headEventId: eventIds.at(-1) ?? null
     }, null, 2)}\n`);
     deliveredEntries += 1;
   }

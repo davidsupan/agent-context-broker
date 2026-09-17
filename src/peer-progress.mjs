@@ -13,13 +13,14 @@ import {
 import { basename, dirname, join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
+import { isStoredAgentDescriptor, normalizeAgentDescriptor } from './agent-identity.mjs';
 import { unsafeContentReason } from './content-safety.mjs';
 import {
   appendBrokerEvent,
   sha256,
   stableJson,
   stableValue,
-  verifyEventStore
+  verifyEventTail
 } from './event-store.mjs';
 import { provenanceForSourceToken } from './source-attestation.mjs';
 import {
@@ -43,16 +44,19 @@ const STAGES = new Set(['research', 'implementation', 'validation', 'review', 'c
 const PIPELINE_STATES = new Set([
   'unknown', 'created', 'pending', 'running', 'passed', 'failed', 'canceled', 'skipped', 'manual'
 ]);
+// Enough for clock skew between local agents and for a summary rounded up to the minute,
+// which is what the honest near-misses in the existing history look like.
+const FUTURE_OBSERVATION_TOLERANCE_MS = 300000;
 const PROPOSAL_FIELDS = new Set([
   'schemaVersion', 'proposalId', 'sourceToken', 'scope', 'work', 'state', 'stage',
   'summary', 'nextSteps', 'limitations', 'changedSurfaces', 'canonicalRefs',
-  'relatedScopes', 'revision', 'observedAt', 'ttlSeconds'
+  'relatedScopes', 'revision', 'observedAt', 'ttlSeconds', 'agent'
 ]);
 const ARTIFACT_FIELDS = new Set([
   'schemaVersion', 'progressId', 'digest', 'actorKey', 'workKeyHash', 'provider',
   'sourceRef', 'scope', 'work', 'state', 'stage', 'summary', 'nextSteps',
   'limitations', 'changedSurfaces', 'canonicalRefs', 'relatedScopes', 'relationKeys',
-  'revision', 'observedAt', 'expiresAt', 'verification', 'sensitivity'
+  'revision', 'observedAt', 'expiresAt', 'verification', 'sensitivity', 'agent'
 ]);
 const DEFAULTS = Object.freeze({
   lockTimeoutMs: 5000,
@@ -228,6 +232,16 @@ function normalizedProposal(inputOptions) {
   }
   const observedAt = new Date(proposal.observedAt);
   if (Number.isNaN(observedAt.getTime())) throw new Error('Peer progress observation time is invalid.');
+  // An observation cannot postdate the write that records it. Nothing enforced this, and a
+  // hand-authored proposal dated ahead produced an event whose valid time preceded nothing
+  // and broke the bi-temporal ordering the ingest audit reports on. The tolerance absorbs
+  // ordinary clock skew and rounding to the minute; it is not a licence to date work in
+  // the future, and the TTL is measured from observedAt either way.
+  const skewMs = (inputOptions.now ? new Date(inputOptions.now) : new Date()).getTime() +
+    FUTURE_OBSERVATION_TOLERANCE_MS;
+  if (observedAt.getTime() > skewMs) {
+    throw new Error('Peer progress observation time is in the future.');
+  }
   const ttlSeconds = proposal.ttlSeconds ?? (proposal.state === 'completed' ? 604800 : 3600);
   if (!Number.isSafeInteger(ttlSeconds) || ttlSeconds < 60 || ttlSeconds > 2592000) {
     throw new Error('Peer progress TTL is invalid.');
@@ -246,6 +260,7 @@ function normalizedProposal(inputOptions) {
     ? { kind: 'thread', key: source.threadRef }
     : stableValue(proposal.work);
   const relatedScopes = normalizedRelations(proposal, options);
+  const agentDescriptor = normalizeAgentDescriptor(proposal.agent);
   const normalized = {
     schemaVersion: 1,
     actorKey: sha256(`${inputOptions.provider}:${source.sessionKey}:${work.kind}:${work.key}`),
@@ -267,7 +282,17 @@ function normalizedProposal(inputOptions) {
     observedAt: observedAt.toISOString(),
     expiresAt: new Date(observedAt.getTime() + (ttlSeconds * 1000)).toISOString(),
     verification: 'unverified',
-    sensitivity: 'shared'
+    sensitivity: 'shared',
+    // Descriptive only. It says which agent published this checkpoint so a reader can tell
+    // two concurrent Codex runs apart; it is self-declared and feeds nothing that decides
+    // acceptance, ranking or scope.
+    //
+    // The key is written only when a descriptor was declared. A stored artifact is
+    // verified with an exact field set, so an `agent: null` key would make every plain
+    // publish unreadable to a deployed tool that predates the field - which is precisely
+    // what took the shared broker down for eighteen hours. Old readers keep working for
+    // every publish that does not use the feature.
+    ...(agentDescriptor ? { agent: agentDescriptor } : {})
   };
   const unsafeReason = unsafeContentReason(normalized);
   if (unsafeReason) throw new Error(`Peer progress contains unsafe content: ${unsafeReason}.`);
@@ -314,6 +339,9 @@ function progressEvent(artifact, source, previousRef) {
       relationCount: artifact.relationKeys.length,
       state: artifact.state,
       stage: artifact.stage,
+      // Enumerated value and a hash, never free text, so ingested payloads stay prose-free.
+      agentKind: artifact.agent?.kind ?? null,
+      agentInstanceHash: artifact.agent?.instanceHash ?? null,
       schema: 'peer-progress-v1'
     }
   };
@@ -336,15 +364,36 @@ function verifiedArtifact(runtimeRoot, event) {
       sha256(stableJson(core)) !== progressId || event.subjectRef !== `acb://progress/${progressId}` ||
       event.provider !== artifact.provider || event.taskKeyHash !== artifact.workKeyHash ||
       event.payload.actorKey !== artifact.actorKey || !event.sourceRefs.includes(artifact.sourceRef) ||
+      // A stored descriptor must still have the shape this module writes; a hand-edited
+      // record cannot smuggle prose or extra fields in through the agent field.
+      !isStoredAgentDescriptor(artifact.agent) ||
       unsafeContentReason(artifact)) {
     throw new Error('Peer progress artifact verification failed.');
   }
   return artifact;
 }
 
-function currentProgressEvents(eventRuntimeRoot) {
-  const events = verifyEventStore({ runtimeRoot: eventRuntimeRoot }).events
-    .filter((event) => event.eventType === 'peer-progress.published');
+// Peer progress is read on every prompt, so it must not cost a full chain walk.
+// No progress artifact can outlive the maximum TTL, so anything recorded before that
+// horizon is already expired and cannot become current. Read a bounded tail and widen
+// it only until the horizon is covered, so the usual case reads a handful of records
+// rather than the entire store.
+const MAX_PROGRESS_TTL_SECONDS = 2592000;
+const PROGRESS_TAIL_START = 512;
+const PROGRESS_TAIL_MAX = 16384;
+
+function currentProgressEvents(eventRuntimeRoot, now = new Date()) {
+  const horizon = now.getTime() - (MAX_PROGRESS_TTL_SECONDS * 1000);
+  let count = PROGRESS_TAIL_START;
+  let tail = verifyEventTail({ runtimeRoot: eventRuntimeRoot, count });
+  while (tail.truncated && count < PROGRESS_TAIL_MAX) {
+    const oldest = tail.events[0];
+    // The window already reaches past the horizon, so nothing older can still be live.
+    if (oldest && Date.parse(oldest.recordedAt) <= horizon) break;
+    count *= 2;
+    tail = verifyEventTail({ runtimeRoot: eventRuntimeRoot, count });
+  }
+  const events = tail.events.filter((event) => event.eventType === 'peer-progress.published');
   const current = new Map();
   for (const event of events) current.set(event.payload.actorKey, event);
   return [...current.values()];
@@ -416,6 +465,14 @@ export async function publishPeerProgress(inputOptions = {}) {
 function queryRelations(options) {
   const primary = normalizeRelation({ kind: options.scopeKind, key: options.scopeKey }, 'primary');
   const relations = [primary];
+  // The configured project a narrow scope sits inside, so progress published against the
+  // project stays visible while working one of its tickets. Configuration only, one scope.
+  if (options.ambientProjectKey &&
+      ['ticket', 'merge-request', 'workstream'].includes(options.scopeKind)) {
+    relations.push(normalizeRelation(
+      { kind: 'project', key: options.ambientProjectKey }, 'ambient-project'
+    ));
+  }
   if (options.scopeKind === 'ticket') {
     relations.push(...ticketPackageRelations(options.ticketPackagesRoot, options.scopeKey));
   }
@@ -584,6 +641,9 @@ export function readPeerProgress(inputOptions = {}) {
       expiresAt: artifact.expiresAt,
       verification: artifact.verification,
       sensitivity: artifact.sensitivity,
+      // Surfaced so a reader can tell concurrent actors apart; it carries no weight in the
+      // relevance score above.
+      agent: artifact.agent ?? null,
       relevance: score
     });
   }

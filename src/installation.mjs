@@ -426,7 +426,7 @@ function normalizeOptions(input = {}) {
     RuntimeHome: options.runtimeHome,
     BunPath: options.bunPath
   })) assertSafeInputPath(path, name);
-  if (!['install', 'remove', 'rollback'].includes(options.action)) {
+  if (!['install', 'remove', 'rollback', 'adopt'].includes(options.action)) {
     throw new Error(`Unsupported installation action: ${options.action}`);
   }
   return options;
@@ -651,6 +651,11 @@ function removeOrRollback(options) {
       baseState: target.baseState
     };
   });
+  // Refused at plan time, not only at execution: an adopted installation has no
+  // pre-install state, so a rollback plan would promise something that cannot happen.
+  if (options.action === 'rollback' && state.adopted === true) {
+    throw new Error('An adopted installation has no pre-install state to roll back to; use remove.');
+  }
   const action = options.action === 'rollback' ? 'Rollback' : 'Remove';
   const plan = {
     action,
@@ -741,10 +746,133 @@ function removeOrRollback(options) {
   };
 }
 
+// Bring an installation that this installer did not record under management, without
+// changing a byte of it. An unmanaged tool directory and hook handlers can exist because an
+// earlier installer wrote them, or because state was lost; either way the guarded
+// remove/install upgrade cannot run without a state file, and deleting the guard is not an
+// option. Adoption verifies that what is on disk is exactly what this installer would have
+// produced - the tool payload is present and each selected provider carries the expected
+// handler exactly once - then records that state so remove and upgrade work from here on.
+function adopt(options) {
+  const statePath = join(options.runtimeHome, 'install-state.json');
+  if (existsSync(statePath)) {
+    throw new Error('An installation is already recorded; nothing to adopt.');
+  }
+  const toolPath = join(options.installRoot, 'tool');
+  if (pathKind(toolPath) !== 'directory') {
+    throw new Error(`No installed tool directory to adopt at ${toolPath}.`);
+  }
+  const manifest = payloadManifest(toolPath);
+  const manifestDigest = sha256Bytes(stableJson(manifest, { compact: true }));
+  const version = JSON.parse(readFileSync(join(toolPath, 'package.json'), 'utf8')).version;
+
+  // The same two file targets a fresh install writes, described in place. installTargets is
+  // not reused here because its overlap guard rightly refuses a package root that is the
+  // tool destination itself - which is exactly what adoption looks at.
+  const fileTargets = [
+    { name: 'tool', kind: 'directory', path: toolPath, source: toolPath, payloadManifest: manifest },
+    {
+      name: 'shared-launcher',
+      kind: 'file',
+      path: join(options.installRoot, 'scripts', 'agent-context.sh'),
+      source: join(options.installRoot, 'scripts', 'agent-context.sh')
+    }
+  ];
+  const homes = { codex: options.codexHome, claude: options.claudeHome };
+  const configTargetsFound = selectedProviders(options.provider).map((provider) => {
+    const definition = PROVIDER_CONFIG[provider];
+    const path = join(homes[provider], definition.configName);
+    const command = buildLifecycleCommand({
+      bunPath: options.bunPath,
+      cliPath: join(toolPath, ...definition.cliPath),
+      runtimeHome: options.runtimeHome,
+      platform: options.platform
+    });
+    const target = { name: definition.targetName, kind: 'config', path, command, events: definition.events.map((event) => event.name) };
+    for (const [event, count] of countConfigHandlers(target)) {
+      if (count !== 1) {
+        throw new Error(`Adoption blocked: expected exactly one managed handler for ${target.name}/${event}, found ${count}. ` +
+          'A handler with a different command is not adopted; remove it by hand or install fresh.');
+      }
+    }
+    return target;
+  });
+  const targets = [...fileTargets, ...configTargetsFound];
+  const targetPlan = targets.map((target) => {
+    const current = targetState(target);
+    if (current.state !== 'present') throw new Error(`Adoption blocked: target is missing: ${target.name}`);
+    return { name: target.name, kind: target.kind, path: target.path, currentState: current.state, currentSha256: current.sha256 };
+  });
+  const plan = {
+    action: 'Adopt',
+    version,
+    provider: String(options.provider).toLowerCase(),
+    bunVersion: assertSupportedBun(),
+    bunPath: options.bunPath,
+    manifestDigest,
+    targets: targetPlan
+  };
+  const digest = planDigest(plan);
+  if (!options.execute) {
+    return { ...plan, writesEnabled: false, planDigest: digest, execution: { expectedManifestDigest: manifestDigest, expectedPlanDigest: digest } };
+  }
+  assertExpectedDigest('ExpectedManifestDigest', options.expectedManifestDigest, manifestDigest);
+  assertExpectedDigest('ExpectedPlanDigest', options.expectedPlanDigest, digest);
+
+  const backupRoot = join(options.runtimeHome, 'backups', `${timestamp()}-adopt`);
+  const activationLock = join(options.runtimeHome, 'runtime', 'activation', 'activation.lock');
+  const lock = openActivationLock(activationLock);
+  try {
+    const records = [];
+    for (const target of targets) {
+      const planned = targetPlan.find((entry) => entry.name === target.name);
+      if (!sameState(targetState(target), { state: planned.currentState, sha256: planned.currentSha256 })) {
+        throw new Error(`Adoption target state changed after planning: ${target.name}`);
+      }
+      // Backed up as they are, so a later removal has the same evidence a fresh install
+      // leaves behind. Files adopt with an absent base: removing an adopted installation
+      // removes the tool, because there is no earlier state to return to. Config adopts
+      // with a present base: removal strips exactly the managed handlers.
+      backupTarget(target, backupRoot);
+      records.push({
+        name: target.name,
+        kind: target.kind,
+        path: target.path,
+        baseState: target.kind === 'config' ? 'present' : 'absent',
+        baseSha256: target.kind === 'config' ? planned.currentSha256 : null,
+        proposedSha256: planned.currentSha256,
+        command: target.kind === 'config' ? target.command : null,
+        events: target.kind === 'config' ? target.events : []
+      });
+    }
+    const state = {
+      schemaVersion: 2,
+      package: 'agent-context-broker',
+      version,
+      provider: String(options.provider).toLowerCase(),
+      runtime: { name: 'bun', version: globalThis.Bun.version, path: options.bunPath },
+      installedAt: new Date().toISOString(),
+      adopted: true,
+      installRoot: options.installRoot,
+      runtimeHome: options.runtimeHome,
+      manifestDigest,
+      planDigest: digest,
+      backupDirectory: backupRoot,
+      targets: records
+    };
+    writeAtomic(statePath, Buffer.from(stableJson(state), 'utf8'));
+    return state;
+  } finally {
+    closeActivationLock(lock, activationLock);
+  }
+}
+
 export function manageInstallation(input = {}) {
   const options = normalizeOptions(input);
   assertSupportedBun();
-  return options.action === 'install' ? install(options) : removeOrRollback(options);
+  if (options.action === 'install') return install(options);
+  if (options.action === 'adopt') return adopt(options);
+  return removeOrRollback(options);
 }
 
 export function verifyInstallation(input = {}) {

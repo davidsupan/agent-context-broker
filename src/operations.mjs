@@ -1,9 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto';
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   renameSync,
   unlinkSync,
   writeFileSync
@@ -105,7 +107,10 @@ export async function migrateLifecycleLedger(inputOptions = {}) {
     await deliverLifecycleOutbox({
       lifecycleRuntimeRoot: runtimeRoot,
       eventRuntimeRoot: inputOptions.eventRuntimeRoot,
-      atomicWriter: atomicWrite
+      atomicWriter: atomicWrite,
+      // Migration is the deliberate backfill path and may legitimately seed an empty
+      // store; the hook path may not.
+      allowGenesis: true
     });
     migrated.add(loaded.inputHash);
     checkpoint.migratedInputHashes = [...migrated].sort();
@@ -145,16 +150,63 @@ function outstandingCount(pendingPath, deliveredPath, pattern) {
 export function diagnoseBroker(inputOptions = {}) {
   const runtimeRoot = resolve(inputOptions.runtimeRoot);
   const eventRuntimeRoot = resolve(inputOptions.eventRuntimeRoot ?? runtimeRoot);
+  // Identity is the resolved physical path plus the head hash, never the lexical
+  // pathname alone. The same pathname has been observed to resolve to different
+  // directories from different processes on one machine, and a store that verifies
+  // cleanly proves nothing about the store another process reads. Report both roots,
+  // whether resolution crossed a reparse point, and distinguish a store that does not
+  // exist from one that is initialised and empty.
+  const resolvedPath = (path) => {
+    try { return realpathSync.native ? realpathSync.native(path) : realpathSync(path); } catch { return null; }
+  };
+  // Reparse detection walks the path components with lstat rather than comparing the
+  // lexical and resolved strings: an 8.3 short name resolves to a different string with
+  // no reparse point anywhere, and a redirected root can resolve to a string that looks
+  // unrelated for reasons that are not a junction either. Node reports both symbolic
+  // links and junctions through isSymbolicLink().
+  const crossesReparsePoint = (path) => {
+    if (!existsSync(path)) return null;
+    let current = resolve(path);
+    const seen = [];
+    while (true) {
+      seen.push(current);
+      const parent = dirname(current);
+      if (parent === current) break;
+      current = parent;
+    }
+    try {
+      return seen.some((component) => lstatSync(component).isSymbolicLink());
+    } catch {
+      return null;
+    }
+  };
+  const runtime = {
+    lexicalRoot: runtimeRoot,
+    resolvedRoot: resolvedPath(runtimeRoot),
+    crossesReparsePoint: crossesReparsePoint(runtimeRoot),
+    lexicalEventRoot: eventRuntimeRoot,
+    resolvedEventRoot: resolvedPath(eventRuntimeRoot),
+    eventRootCrossesReparsePoint: crossesReparsePoint(eventRuntimeRoot)
+  };
+
+  const headPath = join(eventRuntimeRoot, 'events', 'head.json');
+  const recordsPath = join(eventRuntimeRoot, 'events', 'records');
+  const recordCount = fileCount(recordsPath, /^\d{12}-[a-f0-9]{64}\.json$/u);
   let eventStore;
-  try {
-    const verified = verifyEventStore({ runtimeRoot: eventRuntimeRoot });
-    eventStore = {
-      status: 'verified',
-      eventCount: verified.events.length,
-      headHash: verified.head.headHash
-    };
-  } catch (error) {
-    eventStore = { status: 'invalid', errorClass: error.name };
+  if (!existsSync(headPath) && !existsSync(recordsPath)) {
+    eventStore = { status: 'missing', eventCount: 0, recordCount: 0, headHash: null };
+  } else {
+    try {
+      const verified = verifyEventStore({ runtimeRoot: eventRuntimeRoot });
+      eventStore = {
+        status: verified.events.length === 0 ? 'empty' : 'verified',
+        eventCount: verified.events.length,
+        recordCount,
+        headHash: verified.head.headHash
+      };
+    } catch (error) {
+      eventStore = { status: 'invalid', errorClass: error.name, message: error.message, recordCount };
+    }
   }
   const state = readJson(join(runtimeRoot, 'state.json'));
   const registry = readJson(join(runtimeRoot, 'accepted-snapshots.json'));
@@ -165,6 +217,7 @@ export function diagnoseBroker(inputOptions = {}) {
     schemaVersion: 1,
     mode: 'doctor',
     writesEnabled: false,
+    runtime,
     eventStore,
     reconciliation: {
       stateRevision: state?.revision ?? null,

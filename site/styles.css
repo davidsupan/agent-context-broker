@@ -464,6 +464,12 @@ dt {
   background: transparent;
 }
 
+.marker-review {
+  border: 2px dotted var(--muted-strong, var(--progress));
+  background: transparent;
+  border-radius: 50%;
+}
+
 .table-scroll {
   max-width: 100%;
   overflow-x: auto;
@@ -952,6 +958,7 @@ pre {
   }
 
   .marker-progress,
+  .marker-review,
   .brand-mark {
     border-color: CanvasText;
   }

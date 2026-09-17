@@ -35,7 +35,13 @@ const VALUE_OPTIONS = Object.freeze({
   '--runtime-home': 'runtimeHome',
   '--issue-key': 'issueKey',
   '--review-key': 'reviewKey',
-  '--thread-ref': 'threadRef'
+  '--thread-ref': 'threadRef',
+  // Caller self-description, forwarded verbatim to the core. Descriptive only; the core
+  // never reads it as authorization.
+  '--agent-kind': 'agentKind',
+  '--agent-model': 'agentModel',
+  '--agent-harness': 'agentHarness',
+  '--agent-instance': 'agentInstance'
 });
 
 function parseArguments(argv) {
@@ -116,6 +122,28 @@ function pushValue(args, name, value) {
   if (value !== undefined && value !== null && value !== '') args.push(name, String(value));
 }
 
+// Forward the caller descriptor only when the caller said something; the core builds
+// nothing on the caller's behalf, and an absent descriptor keeps artifacts readable by
+// readers that predate the field.
+function pushAgentArguments(args, options) {
+  const declared = [options.agentKind, options.agentModel, options.agentHarness, options.agentInstance]
+    .some((value) => value !== undefined && value !== null && value !== '');
+  if (!declared) return;
+  // A descriptor-bearing artifact is rejected wholesale by any reader that predates the
+  // field, and that reader throws for the entire peer-progress read, not just this item.
+  // Until every reader on the machine is upgraded, declaring one is an outage one flag
+  // away, so it needs an explicit, environment-level acknowledgement.
+  if (process.env.AGENT_CONTEXT_BROKER_DESCRIPTORS !== '1') {
+    throw new Error('Caller descriptors are disabled: readers that predate the agent field reject ' +
+      'descriptor-bearing artifacts for the whole read. Set AGENT_CONTEXT_BROKER_DESCRIPTORS=1 ' +
+      'only once every installed reader has been upgraded.');
+  }
+  pushValue(args, '--agent-kind', options.agentKind);
+  pushValue(args, '--agent-model', options.agentModel);
+  pushValue(args, '--agent-harness', options.agentHarness);
+  pushValue(args, '--agent-instance', options.agentInstance);
+}
+
 function runCore(toolRoot, args) {
   const result = Bun.spawnSync({
     cmd: [process.execPath, join(toolRoot, 'src', 'cli.mjs'), ...args],
@@ -137,6 +165,11 @@ function buildCommonRouteArguments(options) {
   for (const term of options.query) pushValue(args, '--term', term);
   pushValue(args, '--scope-kind', options.scopeKind);
   pushValue(args, '--scope-key', options.scopeKey);
+  // A ticket or review is work inside the configured project, so its standing claims and
+  // progress stay readable from the narrow scope. Configuration, never prompt text.
+  if (['ticket', 'merge-request', 'workstream'].includes(options.scopeKind)) {
+    pushValue(args, '--ambient-project', process.env.AGENT_CONTEXT_BROKER_DEFAULT_PROJECT);
+  }
   if (options.projectScope) args.push('--project-scope');
   if (options.strictIsolation) args.push('--strict-isolation');
   return args;
@@ -174,6 +207,7 @@ function buildQuery(options, paths) {
       process.env.AGENT_CONTEXT_BROKER_DEFAULT_PROJECT ?? 'default-project'
   };
   const args = [COMMANDS.query, ...buildCommonRouteArguments(routed)];
+  pushAgentArguments(args, routed);
   if (!options.strictIsolation) {
     args.push(
       '--runtime-root', paths.runtimeRoot,
@@ -214,6 +248,7 @@ function buildPublication(options, paths) {
     '--ticket-packages-root', paths.ticketPackagesRoot,
     '--review-ledgers-root', paths.reviewLedgersRoot
   ];
+  pushAgentArguments(args, options);
   if (options.execute) args.push('--execute');
   return args;
 }

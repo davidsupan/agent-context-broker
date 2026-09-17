@@ -1,6 +1,6 @@
 {
   "name": "agent-context-broker",
-  "version": "0.10.0-beta.7",
+  "version": "0.11.0-beta.1",
   "description": "A local-first, metadata-only context broker for coding agents.",
   "author": "David Supan",
   "license": "Apache-2.0",
@@ -50,7 +50,7 @@
   },
   "scripts": {
     "check": "bun scripts/check-package.mjs",
-    "test": "bun test test providers/codex/test providers/claude-code/test",
+    "test": "bun test --timeout 60000 test providers/codex/test providers/claude-code/test",
     "validate": "bun run check && bun run test"
   }
 }

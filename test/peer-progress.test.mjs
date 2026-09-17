@@ -166,19 +166,74 @@ describe('peer progress', () => {
     assert.equal(plan.threadRef, plan.work.key);
     await publishPeerProgress({ ...input, execute: true });
 
+    // Every read here pins the clock. Peer progress is TTL-bounded by design, so a read
+    // that defaults to the wall clock stops testing routing the moment the fixture's TTL
+    // elapses and starts testing expiry instead.
     const unrelated = readPeerProgress({
       runtimeRoot, eventRuntimeRoot, provider: 'claude-code', crossProvider: true,
-      scopeKind: 'project', scopeKey: 'example-project', terms: []
+      scopeKind: 'project', scopeKey: 'example-project', terms: [],
+      now: '2026-09-03T08:10:00.000Z'
     });
     const related = readPeerProgress({
       runtimeRoot, eventRuntimeRoot, provider: 'claude-code', crossProvider: true,
-      scopeKind: 'project', scopeKey: 'example-project', terms: ['skill', 'release']
+      scopeKind: 'project', scopeKey: 'example-project', terms: ['skill', 'release'],
+      now: '2026-09-03T08:10:00.000Z'
     });
 
     assert.equal(unrelated.progress.length, 0);
     assert.equal(related.progress.length, 1);
     assert.equal(related.progress[0].work.key, plan.threadRef);
     assert.equal(related.progress[0].provider, 'codex');
+  });
+
+  test('shared Bun wrapper forwards the caller descriptor to the stored artifact', async () => {
+    // The launcher is what agents actually call, so a flag documented on it has to be
+    // accepted by it, not only by the core CLI underneath.
+    const home = root('wrapper-agent-home');
+    const eventRuntimeRoot = join(home, 'runtime', 'events');
+    mkdirSync(eventRuntimeRoot, { recursive: true });
+    // The launcher routes ticket-scoped publication audit into the ticket package.
+    ticket(join(home, 'tickets'), 'APP-10003');
+    const token = await source(eventRuntimeRoot, 'codex', 'wrapper-agent');
+    const proposalPath = join(root('wrapper-agent-input'), 'proposal.json');
+    writeFileSync(proposalPath, `${JSON.stringify(
+      proposal(token, 'APP-10003', 'Descriptor travels through the launcher'), null, 2
+    )}\n`, 'utf8');
+
+    const result = spawnSync(process.execPath, [sharedWrapper(), 'progress',
+      '--provider', 'codex',
+      '--proposal', proposalPath,
+      '--runtime-home', home,
+      '--agent-kind', 'subagent',
+      '--agent-model', 'test-model',
+      '--agent-instance', 'run-42',
+      '--execute'
+    ], { encoding: 'utf8', env: { ...process.env, AGENT_CONTEXT_BROKER_DESCRIPTORS: undefined } });
+    // Without the explicit acknowledgement the launcher refuses: a descriptor-bearing
+    // artifact breaks every reader that predates the field, for the whole read.
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /descriptors are disabled/u);
+
+    const allowed = spawnSync(process.execPath, [sharedWrapper(), 'progress',
+      '--provider', 'codex',
+      '--proposal', proposalPath,
+      '--runtime-home', home,
+      '--agent-kind', 'subagent',
+      '--agent-model', 'test-model',
+      '--agent-instance', 'run-42',
+      '--execute'
+    ], { encoding: 'utf8', env: { ...process.env, AGENT_CONTEXT_BROKER_DESCRIPTORS: '1' } });
+    assert.equal(allowed.status, 0, allowed.stderr);
+    const output = JSON.parse(allowed.stdout);
+
+    const artifact = JSON.parse(readFileSync(
+      join(home, 'runtime', 'reconciliation', 'peer-progress', 'records', `${output.progressId}.json`), 'utf8'));
+    assert.equal(artifact.agent.kind, 'subagent');
+    assert.equal(artifact.agent.model, 'test-model');
+    assert.equal(artifact.agent.attestation, 'self-declared');
+    // The raw instance id never lands on disk; only its hash does.
+    assert.match(artifact.agent.instanceHash, /^[a-f0-9]{64}$/u);
+    assert.equal(JSON.stringify(artifact).includes('run-42'), false);
   });
 
   test('CLI progress publication remains plan-only without execute', async () => {
@@ -562,7 +617,7 @@ describe('peer progress', () => {
     assert.equal(sameOnly.progress.length, 0);
     const isolated = readPeerProgress({
       runtimeRoot, eventRuntimeRoot, provider: 'codex', strictIsolation: true,
-      scopeKind: 'ticket', scopeKey: 'APP-30001'
+      scopeKind: 'ticket', scopeKey: 'APP-30001', now: '2026-08-26T08:10:00.000Z'
     });
     assert.deepEqual(isolated, { progress: [], warnings: [] });
   });
@@ -817,9 +872,11 @@ describe('peer progress', () => {
     const artifact = JSON.parse(readFileSync(path, 'utf8'));
     artifact.summary = 'Tampered progress';
     writeFileSync(path, `${JSON.stringify(artifact, null, 2)}\n`, 'utf8');
+    // Pinned so the throw proves tamper detection rather than the record quietly aging
+    // out before verification ever looks at it.
     assert.throws(() => readPeerProgress({
       runtimeRoot, eventRuntimeRoot, provider: 'codex',
-      scopeKind: 'ticket', scopeKey: 'APP-70001'
+      scopeKind: 'ticket', scopeKey: 'APP-70001', now: '2026-08-26T08:10:00.000Z'
     }), /verification failed/u);
   });
 });
