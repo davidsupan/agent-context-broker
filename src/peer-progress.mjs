@@ -465,6 +465,14 @@ export async function publishPeerProgress(inputOptions = {}) {
 function queryRelations(options) {
   const primary = normalizeRelation({ kind: options.scopeKind, key: options.scopeKey }, 'primary');
   const relations = [primary];
+  // The configured project a narrow scope sits inside, so progress published against the
+  // project stays visible while working one of its tickets. Configuration only, one scope.
+  if (options.ambientProjectKey &&
+      ['ticket', 'merge-request', 'workstream'].includes(options.scopeKind)) {
+    relations.push(normalizeRelation(
+      { kind: 'project', key: options.ambientProjectKey }, 'ambient-project'
+    ));
+  }
   if (options.scopeKind === 'ticket') {
     relations.push(...ticketPackageRelations(options.ticketPackagesRoot, options.scopeKey));
   }

@@ -308,6 +308,7 @@ function naturalPeerProgress(event, options) {
       crossProvider: true,
       scopeKind: scope.kind,
       scopeKey: scope.key,
+      ambientProjectKey: options.defaultProjectKey ?? null,
       terms: safeTermsFromHookEvent(event),
       now: options.now,
       maxProgress: 3

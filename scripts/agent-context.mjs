@@ -165,6 +165,11 @@ function buildCommonRouteArguments(options) {
   for (const term of options.query) pushValue(args, '--term', term);
   pushValue(args, '--scope-kind', options.scopeKind);
   pushValue(args, '--scope-key', options.scopeKey);
+  // A ticket or review is work inside the configured project, so its standing claims and
+  // progress stay readable from the narrow scope. Configuration, never prompt text.
+  if (['ticket', 'merge-request', 'workstream'].includes(options.scopeKind)) {
+    pushValue(args, '--ambient-project', process.env.AGENT_CONTEXT_BROKER_DEFAULT_PROJECT);
+  }
   if (options.projectScope) args.push('--project-scope');
   if (options.strictIsolation) args.push('--strict-isolation');
   return args;

@@ -66,6 +66,17 @@ function acceptedScopeRelations(options) {
   const primary = scopeRelation(options.scopeKind, options.scopeKey);
   const keys = new Map([[primary, 'primary']]);
   if (!options.scopeKind || !options.scopeKey) return keys;
+  // Standing practice is recorded once, at the project the operator configured, and a
+  // ticket or review is work inside that project. Without this, a ticket-scoped query
+  // reaches parent and linked tickets but never the rules that govern all of them, and
+  // the same convention has to be re-recorded per ticket to be readable. The widening is
+  // bounded and comes from operator configuration, never from prompt text: exactly one
+  // extra scope, always a project, and only for a scope narrower than a project.
+  const ambient = options.ambientProjectKey;
+  if (ambient && ['ticket', 'merge-request', 'workstream'].includes(options.scopeKind)) {
+    const ambientKey = scopeRelation('project', ambient);
+    if (!keys.has(ambientKey)) keys.set(ambientKey, 'ambient-project');
+  }
   let related = [];
   try {
     related = relationsForScope(
@@ -536,6 +547,7 @@ async function buildContextQuery(inputOptions = {}) {
       crossProvider: route.profile.crossProvider,
       scopeKind: options.scopeKind,
       scopeKey: options.scopeKey,
+      ambientProjectKey: options.ambientProjectKey,
       ticketPackagesRoot: options.ticketPackagesRoot,
       reviewLedgersRoot: options.reviewLedgersRoot,
       terms,

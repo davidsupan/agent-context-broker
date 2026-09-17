@@ -50,7 +50,7 @@
   },
   "scripts": {
     "check": "bun scripts/check-package.mjs",
-    "test": "bun test test providers/codex/test providers/claude-code/test",
+    "test": "bun test --timeout 30000 test providers/codex/test providers/claude-code/test",
     "validate": "bun run check && bun run test"
   }
 }

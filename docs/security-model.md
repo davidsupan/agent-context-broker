@@ -83,6 +83,22 @@ a records directory with two files for one sequence is a parallel chain, named
 as such; and a hook must not start a genesis once receipts exist. Nothing in
 this record authorises merging, re-ingesting, or deleting either tree.
 
+## The ambient project of a narrow scope
+
+A query bound to a ticket, merge request or workstream also admits the claims and
+progress of one project: the project the operator configured as the default. The
+reason is that standing practice is recorded once, at the project, while work
+happens in tickets; without this, a rule has to be re-recorded per ticket to be
+readable from it.
+
+The widening stays a gate rather than a hole. It adds exactly one scope, always
+of kind project, only to a scope narrower than a project, and the key comes from
+operator configuration or an explicit flag, never from prompt text, a transcript,
+or any other untrusted input. A query already at project scope does not widen.
+Claims of a different project remain unreachable. Term filtering still applies to
+everything the ambient project contributes, so a narrow query does not fill with
+unrelated project material.
+
 ## Caller descriptors and reader compatibility
 
 A caller descriptor is self-declared metadata and never authorization. It is also

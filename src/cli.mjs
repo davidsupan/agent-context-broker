@@ -50,7 +50,7 @@ function usage() {
     '  bun src/cli.mjs sweep --config <json> --runtime-root <path> [--execute] [--minimum-interval-seconds <n>]',
     '  bun src/cli.mjs context-refresh --provider <provider> --source <path> --ledger-dir <path> --runtime-root <path> [--execute --audit-dir <path>]',
     '  bun src/cli.mjs context-route [--profile <id> | --task-kind <kind> | --project-scope] [--strict-isolation]',
-    '  bun src/cli.mjs context-query --provider <provider> --runtime-root <path> --scope-kind <kind> --scope-key <key> [--profile <id> | --task-kind <kind> | --project-scope] [--term <value> ...] [--strict-isolation]',
+    '  bun src/cli.mjs context-query --provider <provider> --runtime-root <path> --scope-kind <kind> --scope-key <key> [--ambient-project <key>] [--profile <id> | --task-kind <kind> | --project-scope] [--term <value> ...] [--strict-isolation]',
     '  bun src/cli.mjs context-query ... --execute --global-audit-dir <path> [--ticket-package-root <path> --ticket-audit-root <path>] [--review-ledgers-root <path>] [--thread-ref <ref> --thread-audit-root <path>]',
     '  bun src/cli.mjs context-publish --provider <provider> --proposal <json> --runtime-root <path> --event-runtime-root <path> [--ticket-packages-root <path>] [--review-ledgers-root <path>] [--execute]',
     '  bun src/cli.mjs progress-publish --provider <provider> --proposal <json> --runtime-root <path> --event-runtime-root <path> [--ticket-packages-root <path>] [--review-ledgers-root <path>] [--execute]',
@@ -171,6 +171,8 @@ function parseArgs(argv) {
       case '--term': options.terms = [...(options.terms ?? []), value]; break;
       case '--scope-kind': options.scopeKind = value; break;
       case '--scope-key': options.scopeKey = value; break;
+      // The project a narrow scope sits inside, so its standing claims stay readable.
+      case '--ambient-project': options.ambientProjectKey = value; break;
       case '--after-sequence': options.afterSequence = nonNegativeInteger(value, argument); break;
       case '--max-ledger-files': options.maxLedgerFiles = positiveInteger(value, argument); break;
       case '--max-files': options.maxFiles = positiveInteger(value, argument); break;

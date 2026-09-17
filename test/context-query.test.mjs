@@ -218,6 +218,48 @@ describe('profiled context query', () => {
 
     assert.deepEqual(result.claims.map((claim) => claim.claimKey), ['build.sonar-workdir']);
   });
+  test('a ticket query reaches the standing claims of the project it sits inside', async () => {
+    const root = tempRoot('ambient-project');
+    const runtimeRoot = join(root, 'runtime');
+    // Standing practice is recorded once, at the project.
+    await publishClaim(runtimeRoot, {
+      claimKey: 'review.merge-request-rules',
+      value: 'refresh current MR head before review'
+    });
+
+    // Without the ambient project, a ticket scope sees none of it: that was the gap.
+    const isolated = await planContextQuery({
+      provider: 'codex', runtimeRoot, profileId: 'review',
+      scopeKind: 'ticket', scopeKey: 'OC-18404'
+    });
+    assert.deepEqual(isolated.claims, []);
+
+    const withProject = await planContextQuery({
+      provider: 'codex', runtimeRoot, profileId: 'review',
+      scopeKind: 'ticket', scopeKey: 'OC-18404',
+      ambientProjectKey: 'example-project'
+    });
+    assert.deepEqual(withProject.claims.map((claim) => claim.claimKey), ['review.merge-request-rules']);
+    assert.ok(withProject.warnings.includes('scope-relations-expanded'));
+
+    // The widening is exactly one project, the configured one, and no other.
+    const otherProject = await planContextQuery({
+      provider: 'codex', runtimeRoot, profileId: 'review',
+      scopeKind: 'ticket', scopeKey: 'OC-18404',
+      ambientProjectKey: 'someone-elses-project'
+    });
+    assert.deepEqual(otherProject.claims, []);
+
+    // A project-scoped query is already at that level and must not widen further.
+    const fromProject = await planContextQuery({
+      provider: 'codex', runtimeRoot, profileId: 'review',
+      scopeKind: 'project', scopeKey: 'example-project',
+      ambientProjectKey: 'someone-elses-project'
+    });
+    assert.deepEqual(fromProject.claims.map((claim) => claim.claimKey), ['review.merge-request-rules']);
+    assert.ok(!fromProject.warnings.includes('scope-relations-expanded'));
+  });
+
   test('keeps claims on the working ticket when query terms do not match, and still filters broad scopes', async () => {
     const root = tempRoot('narrow-scope-floor');
     const runtimeRoot = join(root, 'runtime');

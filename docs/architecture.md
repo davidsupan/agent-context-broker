@@ -41,6 +41,12 @@ rather than a single exact key.
   links; a review ledger contributes the relations recorded for that merge
   request. Accepted claims and peer progress resolve scope the same way, so a
   claim published against a parent ticket is visible while working its child.
+- **Ambient project.** A scope narrower than a project also admits the project
+  the operator configured, so standing practice recorded once at the project is
+  readable while working one of its tickets. It adds exactly one project scope,
+  taken from configuration (`AGENT_CONTEXT_BROKER_DEFAULT_PROJECT`, or
+  `--ambient-project`), never from prompt text, and a project-scoped query does
+  not widen further.
 - Relation expansion is enrichment, never a gate. A missing or unreadable ledger
   removes related scopes but never the primary one, and a snapshot must still
   carry a relation the query accepts before it is verified and read.
