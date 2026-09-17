@@ -85,6 +85,20 @@ from different processes (a native elevated process saw a junction into an older
 agents' hooks, saw a separate directory). A store that verifies cleanly in one
 view proves nothing about the store another process reads.
 
+The mechanism behind that case is MSIX AppData virtualisation: processes started
+by a packaged desktop application, and therefore the lifecycle hooks it spawns,
+have their `%LOCALAPPDATA%` writes redirected into the package's
+`Packages\<app>\LocalCache` tree, while native shells see the real directory.
+The Windows default home sits inside `%LOCALAPPDATA%`, so when agents run from
+a packaged application, set `AGENT_CONTEXT_BROKER_HOME` to a directory outside
+`AppData` (for example `%USERPROFILE%\.agent-context-broker\home`) and pass the
+same directory as `--runtime-home` at install time, so that hooks, tools and
+native shells share one physical store. Move an existing installation with the
+plan-bound `adopt` (if the installation predates install state), `remove`, and
+`install --runtime-home <new>` sequence described under "Upgrade an existing
+installation", then copy the store from the view the hooks were actually writing
+and verify it in the new home with `doctor`.
+
 Bind diagnosis to the resolved path **and** the head hash. `doctor` reports the
 lexical and resolved roots, whether resolution crossed a reparse point, the record
 count, and the head hash, and distinguishes a `missing` store from an initialised

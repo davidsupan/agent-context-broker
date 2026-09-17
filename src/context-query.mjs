@@ -310,7 +310,10 @@ function relevance(claim, snapshot, profile, queryTerms, options) {
   const haystack = claimHaystack(claim, snapshot);
   const profileMatches = profile.keywords.filter((term) => haystack.includes(term)).length;
   const queryMatches = queryTerms.filter((term) => haystack.includes(term)).length;
-  const exactScope = options.scopeKey && snapshot.scope?.key === options.scopeKey ? 4 : 2;
+  // Every query carries a bounded explicit scope (validateScope) and a claim reaches this
+  // point only through a relation to it, so a claim is either in the exact scope or in a
+  // related one; there is no unscoped case left to drop here.
+  const exactScope = snapshot.scope?.key === options.scopeKey ? 4 : 2;
   // Terms that match nothing must not silently empty the result for the narrow scope
   // the agent is actually working. This floor is deliberately limited to ticket and
   // merge-request scopes, mirroring progressScore: a project or workstream scope is
@@ -318,7 +321,6 @@ function relevance(claim, snapshot, profile, queryTerms, options) {
   // scopes still require a term match so a parent ticket cannot flood the query.
   const narrowScope = ['ticket', 'merge-request'].includes(options.scopeKind);
   if (queryTerms.length > 0 && queryMatches === 0 && !(narrowScope && exactScope >= 4)) return -1;
-  if (queryTerms.length === 0 && profileMatches === 0 && exactScope === 0) return -1;
   return (queryMatches * 8) + (profileMatches * 2) + exactScope +
     (claim.providers.includes(options.provider) ? 0 : 1);
 }

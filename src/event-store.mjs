@@ -658,19 +658,48 @@ export async function repairEventHead(inputOptions = {}) {
     if (existsSync(headPath)) unlinkSync(headPath);
     try {
       const events = [];
+      const keys = new Map();
       let previousEventHash = null;
+      let duplicate = null;
       for (const [index, path] of paths.entries()) {
         const event = JSON.parse(readFileSync(path, 'utf8'));
         validateStoredEvent(event, path, index + 1, previousEventHash);
+        // A chain that carries the same idempotency key twice cannot be indexed as a
+        // bijection, so verification rejects it and every later append fails closed
+        // against it. Repair must not paper over that with a head and an index that the
+        // next reader throws away; it either refuses or, on explicit request, ends the
+        // chain before the duplicate and quarantines the rest.
+        if (keys.has(event.idempotencyKey)) {
+          duplicate = { first: keys.get(event.idempotencyKey), second: event.sequence, index };
+          break;
+        }
+        keys.set(event.idempotencyKey, event.sequence);
         events.push(event);
         previousEventHash = event.eventId;
+      }
+      const quarantined = [];
+      let quarantineRoot = null;
+      if (duplicate) {
+        if (options.truncateDuplicateKeys !== true) {
+          throw new Error('Broker event chain holds the same idempotency key twice (sequences ' +
+            `${duplicate.first} and ${duplicate.second}); repair cannot make it consistent. ` +
+            'Records after the duplicate are chained to it, so the only consistent chain ends at ' +
+            `sequence ${duplicate.second - 1}. Re-run with truncateDuplicateKeys to move sequence ` +
+            `${duplicate.second} and everything after it into events/quarantine.`);
+        }
+        quarantineRoot = join(root, 'events', 'quarantine', new Date().toISOString().replace(/[:.]/gu, '-'));
+        mkdirSync(quarantineRoot, { recursive: true });
+        for (const path of paths.slice(duplicate.index)) {
+          renameSync(path, join(quarantineRoot, basename(path)));
+          quarantined.push(basename(path));
+        }
       }
       const head = expectedHead(events);
       if (events.length > 0) writeJson(headPath, head);
       // Repair is the operation that makes the store self-consistent, so the derived
       // idempotency index is rebuilt here rather than left to drift.
       rebuildIdempotencyIndex(root);
-      return { repaired: true, head, eventCount: events.length };
+      return { repaired: true, head, eventCount: events.length, quarantined, quarantineRoot };
     } catch (error) {
       if (existing !== null) atomicWrite(headPath, existing);
       throw error;

@@ -244,6 +244,43 @@ describe('batched event ingestion', () => {
     assert.throws(() => verifyEventStore({ runtimeRoot }), /same idempotency key twice/u);
   });
 
+  test('repair refuses a duplicate-key chain unless told to end the chain before it', async () => {
+    const runtimeRoot = root('dup-key-repair');
+    const inputs = Array.from({ length: 3 }, () => candidate());
+    await appendBrokerEvents({ runtimeRoot, events: inputs, execute: true });
+
+    // Same fabrication as above: the second key vanishes from the index, its replay is
+    // appended as sequence 4, and a fifth event lands on top of the damage.
+    const head = JSON.parse(readFileSync(join(runtimeRoot, 'events', 'head.json'), 'utf8'));
+    const rows = readFileSync(indexPath(runtimeRoot), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+    rows[1].idempotencyKey = sha256('fabricated');
+    writeFileSync(indexPath(runtimeRoot), rows.map((row) => JSON.stringify(row)).join('\n') + '\n', 'utf8');
+    writeFileSync(join(runtimeRoot, 'events', 'idempotency.head.json'),
+      JSON.stringify({ headEventId: head.eventId, count: 3 }) + '\n', 'utf8');
+    await appendBrokerEvents({ runtimeRoot, events: [inputs[1]], execute: true });
+    await appendBrokerEvents({ runtimeRoot, events: [candidate()], execute: true });
+    assert.equal(recordCount(runtimeRoot), 5);
+    assert.throws(() => verifyEventStore({ runtimeRoot }), /same idempotency key twice/u);
+
+    // A plain repair must not hand back a head and an index that verification rejects.
+    await assert.rejects(repairEventHead({ runtimeRoot, execute: true }), /sequences 2 and 4/u);
+    assert.equal(recordCount(runtimeRoot), 5, 'a refusal moves nothing');
+    assert.throws(() => verifyEventStore({ runtimeRoot }), /same idempotency key twice/u);
+
+    // Opting in ends the chain before the duplicate and quarantines the rest.
+    const repaired = await repairEventHead({ runtimeRoot, execute: true, truncateDuplicateKeys: true });
+    assert.equal(repaired.eventCount, 3);
+    assert.equal(repaired.quarantined.length, 2);
+    assert.ok(existsSync(join(repaired.quarantineRoot, repaired.quarantined[0])));
+    assert.equal(recordCount(runtimeRoot), 3);
+    assert.equal(verifyEventStore({ runtimeRoot }).head.eventId, repaired.head.eventId);
+
+    // The store is usable again, and the once-duplicated key is acknowledged as a replay.
+    const replay = await appendBrokerEvents({ runtimeRoot, events: [inputs[1]], execute: true });
+    assert.equal(replay[0].idempotentReplay, true);
+    assert.equal(recordCount(runtimeRoot), 3);
+  });
+
   test('a stale index is rebuilt rather than trusted', async () => {
     const runtimeRoot = root('stale-index');
     const inputs = Array.from({ length: 3 }, () => candidate());

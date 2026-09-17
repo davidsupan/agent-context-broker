@@ -56,7 +56,7 @@ function usage() {
     '  bun src/cli.mjs progress-publish --provider <provider> --proposal <json> --runtime-root <path> --event-runtime-root <path> [--ticket-packages-root <path>] [--review-ledgers-root <path>] [--execute]',
     '  bun src/cli.mjs event-append --event <json> --runtime-root <path> [--execute]',
     '  bun src/cli.mjs event-verify --runtime-root <path>',
-    '  bun src/cli.mjs event-repair --runtime-root <path> [--execute]',
+    '  bun src/cli.mjs event-repair --runtime-root <path> [--execute] [--truncate-duplicate-keys]',
     '  bun src/cli.mjs read-model --runtime-root <path> [--read-model-root <path>] [--execute] [--strict-isolation]',
     '  bun src/cli.mjs source-attest --attestation <json> --runtime-root <path> [--execute]',
     '  bun src/cli.mjs source-verify --provenance <json> --runtime-root <path>',
@@ -108,7 +108,7 @@ function parseArgs(argv) {
     const argument = args[index];
     if ([
       '--execute', '--recursive', '--include-self', '--project-scope',
-      '--strict-isolation', '--require-source-attestation'
+      '--strict-isolation', '--require-source-attestation', '--truncate-duplicate-keys'
     ].includes(argument)) {
       const flagName = argument === '--include-self'
         ? 'includeSelf'
@@ -118,6 +118,8 @@ function parseArgs(argv) {
             ? 'strictIsolation'
           : argument === '--require-source-attestation'
             ? 'requireSourceAttestation'
+          : argument === '--truncate-duplicate-keys'
+            ? 'truncateDuplicateKeys'
         : argument.slice(2);
       options[flagName] = true;
       continue;

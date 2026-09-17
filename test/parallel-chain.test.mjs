@@ -126,7 +126,8 @@ describe('a lifecycle hook may not start a chain, a deliberate backfill may', ()
     // wrong directory. It is what forked the shared store.
     const delivered = join(lifecycle, 'event-outbox', 'delivered');
     mkdirSync(delivered, { recursive: true });
-    writeFileSync(join(delivered, `${sha256('earlier-run')}.json`), JSON.stringify({ schemaVersion: 1 }), 'utf8');
+    writeFileSync(join(delivered, `${sha256('earlier-run')}.json`),
+      JSON.stringify({ schemaVersion: 1, eventIds: [sha256('earlier-event')] }), 'utf8');
 
     await assert.rejects(() => deliverLifecycleOutbox({
       lifecycleRuntimeRoot: lifecycle, eventRuntimeRoot: events, atomicWriter
@@ -173,6 +174,49 @@ describe('a lifecycle hook may not start a chain, a deliberate backfill may', ()
     });
     assert.equal(result.deliveredEvents, 1);
     assert.equal(verifyEventStore({ runtimeRoot: events }).events.length, 2);
+  });
+
+  test('a receipt that delivered nothing does not prove a chain', async () => {
+    const lifecycle = root('empty-receipt-lifecycle');
+    const events = root('empty-receipt-events');
+    outbox(lifecycle);
+    const delivered = join(lifecycle, 'event-outbox', 'delivered');
+    mkdirSync(delivered, { recursive: true });
+    // The guard reads receipts, not file names: an entry that delivered no events left no
+    // chain behind, so an empty store after it is not a contradiction.
+    writeFileSync(join(delivered, `${sha256('empty-run')}.json`),
+      JSON.stringify({ schemaVersion: 1, eventIds: [], headEventId: null }), 'utf8');
+
+    const result = await deliverLifecycleOutbox({
+      lifecycleRuntimeRoot: lifecycle, eventRuntimeRoot: events, atomicWriter
+    });
+    assert.equal(result.deliveredEvents, 1);
+  });
+
+  test('an unreadable receipt counts as proof, so the guard fails closed', async () => {
+    const lifecycle = root('garbage-receipt-lifecycle');
+    const events = root('garbage-receipt-events');
+    outbox(lifecycle);
+    const delivered = join(lifecycle, 'event-outbox', 'delivered');
+    mkdirSync(delivered, { recursive: true });
+    writeFileSync(join(delivered, `${sha256('garbage-run')}.json`), 'not json', 'utf8');
+
+    await assert.rejects(() => deliverLifecycleOutbox({
+      lifecycleRuntimeRoot: lifecycle, eventRuntimeRoot: events, atomicWriter
+    }), /refused to start a new event chain/u);
+  });
+
+  test('a receipt records the chain head it left behind', async () => {
+    const lifecycle = root('receipt-head-lifecycle');
+    const events = root('receipt-head-events');
+    outbox(lifecycle);
+    await deliverLifecycleOutbox({ lifecycleRuntimeRoot: lifecycle, eventRuntimeRoot: events, atomicWriter });
+
+    const delivered = join(lifecycle, 'event-outbox', 'delivered');
+    const [receipt] = readdirSync(delivered).map((name) => JSON.parse(readFileSync(join(delivered, name), 'utf8')));
+    const verified = verifyEventStore({ runtimeRoot: events });
+    assert.equal(receipt.headEventId, verified.head.eventId);
+    assert.deepEqual(receipt.eventIds, [verified.head.eventId]);
   });
 });
 

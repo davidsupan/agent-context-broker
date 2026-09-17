@@ -103,6 +103,24 @@ export function persistLifecycleOutbox(inputOptions) {
   return path;
 }
 
+// A receipt proves that a chain existed only through its content: the events it delivered
+// or the head it left behind. A file name alone is not evidence - a receipt for an entry
+// that delivered nothing says nothing about the store - while a receipt that cannot be
+// read is treated as proof, because failing closed is the whole point of this guard.
+function receiptsProveChain(deliveredRoot) {
+  if (!existsSync(deliveredRoot)) return false;
+  return readdirSync(deliveredRoot).some((name) => {
+    if (!/^[a-f0-9]{64}\.json$/u.test(name)) return false;
+    try {
+      const receipt = JSON.parse(readFileSync(join(deliveredRoot, name), 'utf8'));
+      return typeof receipt?.headEventId === 'string' ||
+        (Array.isArray(receipt?.eventIds) && receipt.eventIds.length > 0);
+    } catch {
+      return true;
+    }
+  });
+}
+
 export async function deliverLifecycleOutbox(inputOptions) {
   const lifecycleRoot = resolve(inputOptions.lifecycleRuntimeRoot);
   const pendingRoot = join(lifecycleRoot, 'event-outbox', 'pending');
@@ -116,9 +134,7 @@ export async function deliverLifecycleOutbox(inputOptions) {
   // exactly how a second genesis got written beside the real chain and failed verification
   // for every reader. Refuse and leave the outbox pending; a deliberate rebuild opts in.
   const deliveredRoot = join(lifecycleRoot, 'event-outbox', 'delivered');
-  const deliveredBefore = existsSync(deliveredRoot) &&
-    readdirSync(deliveredRoot).some((name) => /^[a-f0-9]{64}\.json$/u.test(name));
-  if (deliveredBefore && inputOptions.allowGenesis !== true) {
+  if (receiptsProveChain(deliveredRoot) && inputOptions.allowGenesis !== true) {
     const tip = verifyEventTail({ runtimeRoot: inputOptions.eventRuntimeRoot, count: 1 });
     if (tip.head.sequence === 0) {
       throw new Error('Lifecycle delivery refused to start a new event chain: this lifecycle has ' +
@@ -160,11 +176,14 @@ export async function deliverLifecycleOutbox(inputOptions) {
         deliveredEvents += 1;
       }
     }
+    // The receipt names the events it delivered and the chain head it left behind, so a
+    // later run can tell a receipt that proves a chain from one that delivered nothing.
     inputOptions.atomicWriter(receiptPath, `${JSON.stringify({
       schemaVersion: 1,
       runIdHash: sha256(outbox.runId),
       inventoryHash: outbox.inventoryHash,
-      eventIds
+      eventIds,
+      headEventId: eventIds.at(-1) ?? null
     }, null, 2)}\n`);
     deliveredEntries += 1;
   }
