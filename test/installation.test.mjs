@@ -57,6 +57,20 @@ afterEach(() => {
 });
 
 describe('Bun installation manager', () => {
+  test('installed payload includes corpus commands, documentation and passes runtime validation', () => {
+    const root = testRoot('complete-payload');
+    executeInstall(options(root));
+    const tool = join(root, 'install', 'tool');
+    for (const file of ['scripts/archive-corpus.mjs', 'scripts/verify-archive.mjs',
+      'scripts/prune-archived-corpus.mjs', 'scripts/extract-handoff-candidates.mjs',
+      'docs/architecture.md', 'LICENSE.md', 'README.md']) {
+      assert.equal(existsSync(join(tool, file)), true, file);
+    }
+    const result = spawnSync(process.execPath, ['scripts/check-package.mjs', '--installed'], {
+      cwd: tool, encoding: 'utf8', timeout: 30000
+    });
+    assert.equal(result.status, 0, result.stderr);
+  });
   test('plans without writing and binds execution to manifest and target state', () => {
     const root = testRoot('plan', { create: false });
     const plan = manageInstallation(options(root));

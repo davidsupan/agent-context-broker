@@ -25,17 +25,27 @@ export const MINIMUM_BUN_VERSION = '1.4.0';
 
 const PAYLOAD_DIRECTORIES = Object.freeze([
   'adapters',
+  'docs',
   'examples',
   'fixtures',
   'profiles',
   'providers',
   'schemas',
+  'scripts',
   'src',
   'test'
 ]);
 
 const PAYLOAD_FILES = Object.freeze([
   'package.json',
+  'README.md',
+  'LICENSE',
+  'LICENSE.md',
+  'CODE_OF_CONDUCT.md',
+  'CONTRIBUTING.md',
+  'GOVERNANCE.md',
+  'SECURITY.md',
+  'SUPPORT.md',
   'scripts/agent-context-broker.sh',
   'scripts/agent-context.mjs',
   'scripts/agent-context.sh',

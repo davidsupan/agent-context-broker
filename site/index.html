@@ -223,6 +223,7 @@
             <h2 id="install-title">Guarded installation</h2>
             <p>Installation is plan-only by default. Activation proceeds only when the exact manifest and plan digests are passed back to the unchanged command.</p>
             <p>The installer preserves existing lifecycle handlers, creates byte-exact backups, and supports plan-bound removal and rollback.</p>
+            <p>Managed installations include the complete command-script set and documentation, including the explicitly invoked corpus tools. Installing them does not run corpus processing or accept extracted claims.</p>
             <a href="https://github.com/davidsupan/agent-context-broker/blob/main/docs/getting-started.md">Full install, verify, remove, and rollback flow</a>
           </div>
           <pre tabindex="0"><code>bun scripts/manage-agent-context-broker-installation.mjs install \
