@@ -65,6 +65,28 @@ configuration, then inspect the installation:
 bun "$HOME/.agent-context-broker/tool/scripts/test-agent-context-broker-installation.mjs"
 ```
 
+The installed `tool/` directory includes the complete command-script set,
+documentation, and license files. This includes the corpus archive, verification,
+pruning, ingestion-audit, and handoff-candidate scripts documented below. Run
+them explicitly with reviewed inputs; installation does not run a backfill,
+schedule corpus processing, or promote extracted claims.
+
+Check the installed package contents separately from provider-hook verification:
+
+```sh
+bun "$HOME/.agent-context-broker/tool/scripts/check-package.mjs" --installed
+```
+
+Equivalently, run `bun run check:installed` from the installed `tool/` directory.
+This mode checks the runtime payload without requiring checkout-only `.github/`
+files, `.editorconfig`, or the project site. Keep using `bun run validate` in the
+checkout for repository validation. For a custom installation root, substitute
+that root in both verification commands.
+
+Existing installations do not acquire missing scripts when a checkout is
+updated. Follow the plan-bound upgrade flow below, then verify the installed
+copy rather than relying on a successful checkout check.
+
 Use `--provider codex` or `--provider claude` to install only one bridge.
 Override `--codex-home`, `--claude-home`, `--install-root`, or `--runtime-home`
 for a non-default layout.

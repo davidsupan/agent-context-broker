@@ -33,3 +33,32 @@ credentials, personal paths, or private integration configuration in a release.
 Release immutability should remain enabled once the first public prerelease is
 published. A broken release is superseded by a new version rather than silently
 replacing its tag or assets.
+
+## Installed payload checks
+
+The managed installation includes the complete `scripts/` directory,
+documentation, and license files. Validate that installed payload as well as
+the checkout: the installation tests exercise an isolated installation and run
+`scripts/check-package.mjs --installed` against its copied tool directory.
+The same check is available as `bun run check:installed` from that directory.
+It does not require repository CI configuration or the project site, and does
+not replace provider-hook verification.
+
+When release notes describe this payload fix, distinguish command availability
+from execution: existing installations need the documented plan-bound upgrade;
+copying the scripts does not run corpus processing or accept candidate claims.
+
+## Project site publication
+
+The `Pages` workflow publishes `site/` directly, with no dependency installation
+or site build. A push to `main` triggers it only when `site/**` or the Pages
+workflow changes. Documentation-only changes outside `site/` do not trigger a
+deployment. The workflow also supports manual dispatch.
+
+Before publication, confirm Pages uses GitHub Actions and that the
+`github-pages` environment permits the intended deployment. The workflow needs
+`contents: read`, `pages: write`, and `id-token: write`. It runs independently
+of CI, so a successful deployment is not evidence that the platform tests passed.
+Use the reviewed, green `main` revision, then verify the deployment revision and
+published page. Site publication neither creates a package release nor upgrades
+installed tools.

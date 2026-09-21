@@ -80,6 +80,8 @@ bun scripts/manage-agent-context-broker-installation.mjs install \
 
 The installer preserves existing Codex and Claude Code lifecycle handlers, writes byte-exact backups, and copies a verifier and uninstaller into the managed installation. Removal and rollback are also plan-bound; see the [getting started guide](docs/getting-started.md) for the complete flow.
 
+The managed tool payload includes the complete `scripts/` directory, documentation, and license files. Corpus archive, verification, pruning, and handoff-candidate commands are available from the installed tool, not only from a checkout. Installing them does not run corpus processing or accept extracted claims. Use `bun run check:installed` from the installed `tool/` directory to check its package contents; repository CI and the project site remain outside that payload.
+
 ## Core workflows
 
 ### Query accepted context

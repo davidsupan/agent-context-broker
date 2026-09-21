@@ -7,6 +7,9 @@ import { fileURLToPath } from 'node:url';
 import { assertSupportedBun } from '../src/installation.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const args = process.argv.slice(2);
+if (args.some((arg) => arg !== '--installed')) throw new Error('Unknown package check argument.');
+const installed = args.includes('--installed');
 const requiredFiles = Object.freeze([
   '.editorconfig',
   '.github/CODEOWNERS',
@@ -87,6 +90,8 @@ function slash(path) {
 
 assertSupportedBun();
 for (const file of requiredFiles) {
+  // Repository governance and the website are not part of the installed runtime.
+  if (installed && (file === '.editorconfig' || file.startsWith('.github/') || file.startsWith('site/'))) continue;
   const path = join(root, ...file.split('/'));
   if (!existsSync(path) || !lstatSync(path).isFile()) throw new Error(`Required package file is missing: ${file}`);
 }
@@ -156,6 +161,7 @@ for (const heading of [
   if (!adapterContract.includes(heading)) throw new Error(`Adapter contract heading is missing: ${heading}`);
 }
 
+if (!installed) {
 const siteIndex = readFileSync(join(root, 'site', 'index.html'), 'utf8');
 const siteStyles = readFileSync(join(root, 'site', 'styles.css'), 'utf8');
 const siteRobots = readFileSync(join(root, 'site', 'robots.txt'), 'utf8');
@@ -212,6 +218,7 @@ if (!siteRobots.includes('Sitemap: https://davidsupan.github.io/agent-context-br
 }
 if (!siteMap.includes('<loc>https://davidsupan.github.io/agent-context-broker/</loc>')) {
   throw new Error('The project site sitemap must contain the canonical page URL.');
+}
 }
 
 process.stdout.write(`${JSON.stringify({
