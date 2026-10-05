@@ -20,6 +20,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { defaultRuntimeHome } from './platform-paths.mjs';
+import { POLICY_FILE, parseProviderPolicy } from './provider-policy.mjs';
 
 export const MINIMUM_BUN_VERSION = '1.4.0';
 
@@ -425,6 +426,7 @@ function normalizeOptions(input = {}) {
     bunPath: realpathSync(resolve(input.bunPath ?? process.execPath)),
     expectedManifestDigest: input.expectedManifestDigest,
     expectedPlanDigest: input.expectedPlanDigest,
+    providerPolicy: input.providerPolicy ? resolve(input.providerPolicy) : undefined,
     execute: input.execute === true,
     platform
   };
@@ -434,7 +436,8 @@ function normalizeOptions(input = {}) {
     CodexHome: options.codexHome,
     ClaudeHome: options.claudeHome,
     RuntimeHome: options.runtimeHome,
-    BunPath: options.bunPath
+    BunPath: options.bunPath,
+    ...(options.providerPolicy ? { ProviderPolicy: options.providerPolicy } : {})
   })) assertSafeInputPath(path, name);
   if (!['install', 'remove', 'rollback', 'adopt'].includes(options.action)) {
     throw new Error(`Unsupported installation action: ${options.action}`);
@@ -463,6 +466,19 @@ function installTargets(options, manifest) {
       source: join(options.packageRoot, 'scripts', 'agent-context.sh')
     },
   ];
+}
+
+// The optional provider policy is installed like any other file target, so it is planned,
+// backed up, verified and restored by remove or rollback with the rest of the installation.
+function policyTargets(options) {
+  if (!options.providerPolicy) return [];
+  parseProviderPolicy(readFileSync(options.providerPolicy, 'utf8'));
+  return [{
+    name: 'provider-policy',
+    kind: 'file',
+    path: join(options.runtimeHome, POLICY_FILE),
+    source: options.providerPolicy
+  }];
 }
 
 function configTargets(options) {
@@ -540,7 +556,7 @@ function install(options) {
   const manifest = payloadManifest(options.packageRoot);
   const manifestDigest = sha256Bytes(stableJson(manifest, { compact: true }));
   const version = JSON.parse(readFileSync(join(options.packageRoot, 'package.json'), 'utf8')).version;
-  const targets = [...installTargets(options, manifest), ...configTargets(options)];
+  const targets = [...installTargets(options, manifest), ...configTargets(options), ...policyTargets(options)];
   const targetPlan = targets.map((target) => {
     const current = targetState(target);
     const proposedSha256 = target.kind === 'directory'

@@ -4,6 +4,7 @@ import {
   planReconciliation,
   reconcileClaimBatch
 } from './reconciliation.mjs';
+import { assertPublishable } from './provider-policy.mjs';
 import { provenanceForSourceToken } from './source-attestation.mjs';
 import { relationsForScope } from './work-ledgers.mjs';
 
@@ -48,6 +49,7 @@ export function buildClaimBatch(inputOptions = {}) {
   if (inputOptions.provider && provenance.provider !== inputOptions.provider) {
     throw new Error('Source token provider does not match the publishing provider.');
   }
+  assertPublishable(inputOptions.providerPolicy, provenance.provider, proposal.scope, proposal.claims);
   const claimProvenance = {
     provider: provenance.provider,
     sessionKey: provenance.sessionKey,

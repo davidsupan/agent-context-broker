@@ -33,6 +33,8 @@ const consumer = createLifecycleConsumer({
   reviewLedgersRoot: process.env.AGENT_CONTEXT_BROKER_REVIEW_LEDGERS_ROOT ??
     join(runtimeHome, 'runtime', 'reviews'),
   defaultProjectKey: process.env.AGENT_CONTEXT_BROKER_DEFAULT_PROJECT ?? null,
+  providerPolicyPath: process.env.AGENT_CONTEXT_BROKER_PROVIDER_POLICY ??
+    join(runtimeHome, 'provider-policy.json'),
   strictIsolation: () => process.env.AGENT_CONTEXT_BROKER_STRICT_ISOLATION === '1',
   supportedEvents: ['SessionStart', 'UserPromptSubmit', 'Stop'],
   advisoryEvents: ['SessionStart', 'UserPromptSubmit'],
