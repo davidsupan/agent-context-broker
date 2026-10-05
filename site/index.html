@@ -207,6 +207,7 @@
           <dl class="trust-grid">
             <div><dt>Local-first</dt><dd>The broker runs as local Bun scripts with no hosted component. Runtime state stays in a private per-user directory.</dd></div>
             <div><dt>Strict isolation</dt><dd><code>AGENT_CONTEXT_BROKER_STRICT_ISOLATION=1</code> returns before registry reads or audit writes.</dd></div>
+            <div><dt>Per-provider policy</dt><dd>An optional <code>provider-policy.json</code> narrows what each provider may read and publish, by scope, sensitivity, and evidence class. Without it nothing changes; an invalid file fails closed.</dd></div>
             <div><dt>Provenance</dt><dd>Claims carry source hashes. Accepted snapshots are content-addressed and hashes are checked again on read.</dd></div>
             <div><dt>Metadata-only audit</dt><dd>Audit records contain hashes, counts, watermarks, warnings, and dispositions, never prompts or responses.</dd></div>
             <div><dt>Caller identity</dt><dd>Progress and audits can record the publishing agent: kind, harness, model, and a hashed instance id. It is self-declared and descriptive, so it never raises confidence, changes acceptance, or outranks another actor.</dd></div>

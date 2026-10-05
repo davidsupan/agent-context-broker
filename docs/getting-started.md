@@ -91,6 +91,14 @@ Use `--provider codex` or `--provider claude` to install only one bridge.
 Override `--codex-home`, `--claude-home`, `--install-root`, or `--runtime-home`
 for a non-default layout.
 
+Add `--provider-policy <file>` to install an optional
+[provider policy](provider-policy.md) with the bridges. The installer validates
+the file and writes it to `<runtime home>/provider-policy.json` as one more
+planned, backed-up target, so it is part of the same plan digest. `remove` and
+`rollback` treat it like the other targets. After activation, `doctor` reports
+the loaded policy as its hash and rule counts per provider. An installation
+without the option behaves exactly as before.
+
 ## Query safely
 
 The high-level launcher chooses a private runtime directory below:
