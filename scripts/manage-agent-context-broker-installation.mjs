@@ -13,6 +13,7 @@ const VALUE_OPTIONS = Object.freeze({
   '--claude-home': 'claudeHome',
   '--runtime-home': 'runtimeHome',
   '--bun-path': 'bunPath',
+  '--provider-policy': 'providerPolicy',
   '--expected-manifest-digest': 'expectedManifestDigest',
   '--expected-plan-digest': 'expectedPlanDigest'
 });

@@ -18,6 +18,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { normalizeAgentDescriptor } from './agent-identity.mjs';
 import { loadContextProfiles, routeContextProfile } from './context-router.mjs';
 import { readPeerProgress } from './peer-progress.mjs';
+import { policyEntry, scopeReadable } from './provider-policy.mjs';
 import { relationsForScope, reviewLedgerContext } from './work-ledgers.mjs';
 
 const PROVIDERS = new Set(['codex', 'claude-code']);
@@ -77,6 +78,9 @@ function acceptedScopeRelations(options) {
     const ambientKey = scopeRelation('project', ambient);
     if (!keys.has(ambientKey)) keys.set(ambientKey, 'ambient-project');
   }
+  // Related scopes are recorded as hashes, so read rules cannot be checked against them;
+  // a provider with read rules sees only the scopes it asked for.
+  if (options.scopeExpansion === false) return keys;
   let related = [];
   try {
     related = relationsForScope(
@@ -348,6 +352,8 @@ function publicClaim(claim, snapshot, score) {
     valueOmitted: claim.valueOmitted,
     providers: claim.providers,
     canonicalRefs: claim.canonicalRefs,
+    // Readers decide what may be copied into shared artifacts, so the label travels with the claim.
+    sensitivity: claim.sensitivity,
     acceptedAt: claim.acceptedAt,
     freshness: claim.freshness ?? null,
     freshnessStatus: claim.freshnessStatus,
@@ -383,9 +389,13 @@ function renderContext(result, maxBytes) {
     `Agent Context Broker profile: ${result.profile}.`,
     'Use only the accepted, hash-verified claims below and re-check canonical sources when freshness matters.'
   ];
+  if (result.claims.some((claim) => claim.sensitivity === 'private')) {
+    lines.push('Claims marked (private) must not be copied into shared artifacts such as merge requests, issues or wikis.');
+  }
   for (const claim of result.claims) {
     const value = claim.valueOmitted ? '<value omitted by size limit>' : stableJson(claim.value);
-    lines.push(`- ${claim.claimKey}: ${value} [${claim.providers.join('+')}] (${claim.canonicalRefs.join(', ')})`);
+    const label = claim.sensitivity === 'private' ? ' (private)' : '';
+    lines.push(`- ${claim.claimKey}${label}: ${value} [${claim.providers.join('+')}] (${claim.canonicalRefs.join(', ')})`);
   }
   if (result.claims.length === 0) lines.push('No matching accepted claims were found.');
   if (result.peerProgress.length > 0) {
@@ -531,6 +541,20 @@ async function buildContextQuery(inputOptions = {}) {
     }
   };
 
+  const rule = policyEntry(options.providerPolicy, options.provider);
+  if (rule && route.shouldQuery && (rule.strictIsolation ||
+      !scopeReadable(rule, { kind: options.scopeKind, key: options.scopeKey }))) {
+    base.warnings.push('provider-policy-denied');
+    base.context = renderContext(base, route.profile?.maxContextBytes ?? 1024);
+    base.injection = { payload: base.context, digest: hash(base.context), persisted: false, artifact: null };
+    return base;
+  }
+  if (rule?.read) {
+    options.scopeExpansion = false;
+    if (options.ambientProjectKey && !scopeReadable(rule, { kind: 'project', key: options.ambientProjectKey })) {
+      options.ambientProjectKey = null;
+    }
+  }
   if (!route.shouldQuery) {
     base.context = renderContext(base, route.profile?.maxContextBytes ?? 1024);
     base.injection = { payload: base.context, digest: hash(base.context), persisted: false, artifact: null };
@@ -550,6 +574,7 @@ async function buildContextQuery(inputOptions = {}) {
       ambientProjectKey: options.ambientProjectKey,
       ticketPackagesRoot: options.ticketPackagesRoot,
       reviewLedgersRoot: options.reviewLedgersRoot,
+      providerPolicy: options.providerPolicy,
       terms,
       now,
       maxProgress: Math.min(route.profile.maxClaims, 8)

@@ -131,6 +131,36 @@ describe('profiled context query', () => {
     assert.match(result.context, /\[codex\]/u);
   });
 
+  test('labels private claims so readers keep them out of shared artifacts', async () => {
+    const root = tempRoot('sensitivity-label');
+    const runtimeRoot = join(root, 'runtime');
+    const first = await publishClaim(runtimeRoot);
+    await publishClaim(runtimeRoot, {
+      claimKey: 'review.private-note',
+      value: 'private review note',
+      expectedSnapshotHash: first.snapshotHash,
+      observedAt: '2026-08-25T09:01:30.000Z',
+      sensitivity: 'private'
+    });
+
+    const result = await planContextQuery({
+      provider: 'codex', runtimeRoot, profileId: 'review', terms: ['review'],
+      scopeKind: 'project', scopeKey: 'example-project'
+    });
+
+    const byKey = Object.fromEntries(result.claims.map((claim) => [claim.claimKey, claim.sensitivity]));
+    assert.deepEqual(byKey, { 'review.merge-request-rules': 'shared', 'review.private-note': 'private' });
+    assert.match(result.context, /- review\.private-note \(private\): /u);
+    assert.match(result.context, /- review\.merge-request-rules: /u);
+    assert.match(result.context, /must not be copied into shared artifacts/u);
+
+    const sharedOnly = await planContextQuery({
+      provider: 'claude-code', runtimeRoot, profileId: 'review', terms: ['review'],
+      scopeKind: 'project', scopeKey: 'example-project'
+    });
+    assert.equal(sharedOnly.context.includes('must not be copied'), false);
+  });
+
   test('lets Codex consume a later accepted Claude Code claim', async () => {
     const root = tempRoot('codex-consumes');
     const runtimeRoot = join(root, 'runtime');
