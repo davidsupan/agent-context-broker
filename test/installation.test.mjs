@@ -139,6 +139,28 @@ describe('Bun installation manager', () => {
     assert.deepEqual(JSON.parse(lockedHook.stdout), { continue: true });
   });
 
+  test('an optional provider policy is validated, installed as a planned target and removed with it', () => {
+    const root = testRoot('policy');
+    const policyPath = join(root, 'policy.json');
+    writeFileSync(policyPath, JSON.stringify({ schemaVersion: 1, providers: { codex: { read: { allow: ['workstream:research-*'] } } } }));
+    const input = { ...options(root, 'codex'), providerPolicy: policyPath };
+    const { plan, state } = executeInstall(input);
+    assert.ok(plan.targets.some((target) => target.name === 'provider-policy' && target.baseState === 'absent'));
+    const installed = join(input.runtimeHome, 'provider-policy.json');
+    assert.equal(readFileSync(installed, 'utf8'), readFileSync(policyPath, 'utf8'));
+    assert.ok(state.targets.some((target) => target.name === 'provider-policy'));
+
+    const removeInput = { ...input, action: 'remove' };
+    const removePlan = manageInstallation(removeInput);
+    manageInstallation({ ...removeInput, expectedPlanDigest: removePlan.planDigest, execute: true });
+    assert.equal(existsSync(installed), false);
+
+    const badPath = join(root, 'bad-policy.json');
+    writeFileSync(badPath, '{"schemaVersion":1,"providers":{"codex":{"unknown":true}}}');
+    assert.throws(() => manageInstallation({ ...options(testRoot('bad-policy'), 'codex'), providerPolicy: badPath }),
+      /Provider policy is invalid/u);
+  });
+
   test('remove deletes only managed hooks and keeps later unrelated changes', () => {
     const root = testRoot('remove');
     const input = options(root, 'codex');

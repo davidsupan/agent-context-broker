@@ -24,6 +24,7 @@ import { realpathSync as resolvePhysicalPath } from 'node:fs';
 
 import { verifyEventTail } from './event-store.mjs';
 import { readPeerProgress } from './peer-progress.mjs';
+import { loadProviderPolicy, policyEntry, scopeReadable } from './provider-policy.mjs';
 import {
   planSourceAttestation,
   provenanceForSourceToken
@@ -147,7 +148,7 @@ function loadState(path) {
   return state;
 }
 
-function acceptedSnapshots(path, relationKeys) {
+function acceptedSnapshots(path, relationKeys, readable = () => true) {
   if (!path || !existsSync(path)) return [];
   const registry = JSON.parse(readFileSync(path, 'utf8'));
   if (registry.schemaVersion !== 1 || !Array.isArray(registry.snapshots)) {
@@ -157,6 +158,7 @@ function acceptedSnapshots(path, relationKeys) {
   return registry.snapshots
     .filter((snapshot) => snapshot?.state === 'clean')
     .filter((snapshot) => snapshot.relationKeys?.some((key) => relations.has(key)))
+    .filter((snapshot) => readable(snapshot.scope))
     .map((snapshot) => ({
       snapshotId: String(snapshot.snapshotId ?? ''),
       digest: String(snapshot.digest ?? ''),
@@ -309,6 +311,7 @@ function naturalPeerProgress(event, options) {
       scopeKind: scope.kind,
       scopeKey: scope.key,
       ambientProjectKey: options.defaultProjectKey ?? null,
+      providerPolicy: options.providerPolicy ?? null,
       terms: safeTermsFromHookEvent(event),
       now: options.now,
       maxProgress: 3
@@ -473,7 +476,9 @@ export function createLifecycleConsumer(inputDefinition) {
       lockStaleMs: inputOptions.lockStaleMs ?? 300000,
       stateLimit: inputOptions.stateLimit ?? DEFAULT_STATE_LIMIT,
       maxScanBytes: inputOptions.maxScanBytes ?? 16 * 1024 * 1024,
-      tailBootstrapBytes: inputOptions.tailBootstrapBytes ?? 1024 * 1024
+      tailBootstrapBytes: inputOptions.tailBootstrapBytes ?? 1024 * 1024,
+      providerPolicyPath: inputOptions.providerPolicyPath ?? definition.providerPolicyPath ?? null,
+      providerPolicy: inputOptions.providerPolicy ?? null
     };
   }
 
@@ -491,6 +496,19 @@ export function createLifecycleConsumer(inputDefinition) {
       eventName,
       mode: 'advisory'
     };
+    if (!options.providerPolicy && options.providerPolicyPath) {
+      try {
+        options.providerPolicy = loadProviderPolicy({ providerPolicyPath: options.providerPolicyPath });
+      } catch {
+        // A present but unreadable policy withholds context rather than widening access.
+        appendAudit(options, { ...auditBase, outcome: 'provider-policy-invalid', durationMs: Date.now() - startedAt });
+        return { continue: true };
+      }
+    }
+    const policyRule = policyEntry(options.providerPolicy, definition.provider);
+    if (policyRule?.strictIsolation) return { continue: true };
+    if (policyRule && policyRule.defaultProject !== undefined) options.defaultProjectKey = policyRule.defaultProject;
+    const snapshotReadable = (scope) => !policyRule?.read || scopeReadable(policyRule, scope);
     if (!definition.supportedEvents.has(eventName)) {
       appendAudit(options, { ...auditBase, outcome: 'ignored', durationMs: Date.now() - startedAt });
       return { continue: true };
@@ -601,7 +619,7 @@ export function createLifecycleConsumer(inputDefinition) {
         });
         const delivered = new Set(state.deliveredDeltaIds ?? []);
         const freshDeltas = related.deltas.filter((delta) => !delivered.has(delta.deltaId));
-        const snapshots = acceptedSnapshots(options.acceptedSnapshots, identity.relationKeys);
+        const snapshots = acceptedSnapshots(options.acceptedSnapshots, identity.relationKeys, snapshotReadable);
         const priorSnapshots = new Set(state.acceptedSnapshotDigests ?? []);
         const freshSnapshots = snapshots.filter((snapshot) => !priorSnapshots.has(snapshot.digest));
         const freshSourceToken = state.sourceToken === sourceToken ? null : sourceToken;

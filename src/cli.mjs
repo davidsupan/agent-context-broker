@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import * as claudeCode from './claude-inventory.mjs';
 import * as codex from './codex-inventory-v2.mjs';
 import { planContextQuery, runContextQuery } from './context-query.mjs';
+import { describeProviderPolicy, loadProviderPolicy } from './provider-policy.mjs';
 import { planContextPublication, publishContext } from './context-publish.mjs';
 import {
   planPeerProgressPublication,
@@ -50,10 +51,10 @@ function usage() {
     '  bun src/cli.mjs sweep --config <json> --runtime-root <path> [--execute] [--minimum-interval-seconds <n>]',
     '  bun src/cli.mjs context-refresh --provider <provider> --source <path> --ledger-dir <path> --runtime-root <path> [--execute --audit-dir <path>]',
     '  bun src/cli.mjs context-route [--profile <id> | --task-kind <kind> | --project-scope] [--strict-isolation]',
-    '  bun src/cli.mjs context-query --provider <provider> --runtime-root <path> --scope-kind <kind> --scope-key <key> [--ambient-project <key>] [--profile <id> | --task-kind <kind> | --project-scope] [--term <value> ...] [--strict-isolation]',
+    '  bun src/cli.mjs context-query --provider <provider> --runtime-root <path> --scope-kind <kind> --scope-key <key> [--ambient-project <key>] [--profile <id> | --task-kind <kind> | --project-scope] [--term <value> ...] [--strict-isolation] [--provider-policy <path>]',
     '  bun src/cli.mjs context-query ... --execute --global-audit-dir <path> [--ticket-package-root <path> --ticket-audit-root <path>] [--review-ledgers-root <path>] [--thread-ref <ref> --thread-audit-root <path>]',
-    '  bun src/cli.mjs context-publish --provider <provider> --proposal <json> --runtime-root <path> --event-runtime-root <path> [--ticket-packages-root <path>] [--review-ledgers-root <path>] [--execute]',
-    '  bun src/cli.mjs progress-publish --provider <provider> --proposal <json> --runtime-root <path> --event-runtime-root <path> [--ticket-packages-root <path>] [--review-ledgers-root <path>] [--execute]',
+    '  bun src/cli.mjs context-publish --provider <provider> --proposal <json> --runtime-root <path> --event-runtime-root <path> [--ticket-packages-root <path>] [--review-ledgers-root <path>] [--provider-policy <path>] [--execute]',
+    '  bun src/cli.mjs progress-publish --provider <provider> --proposal <json> --runtime-root <path> --event-runtime-root <path> [--ticket-packages-root <path>] [--review-ledgers-root <path>] [--provider-policy <path>] [--execute]',
     '  bun src/cli.mjs event-append --event <json> --runtime-root <path> [--execute]',
     '  bun src/cli.mjs event-verify --runtime-root <path>',
     '  bun src/cli.mjs event-repair --runtime-root <path> [--execute] [--truncate-duplicate-keys]',
@@ -166,6 +167,7 @@ function parseArgs(argv) {
       case '--agent-instance': options.agentInstance = value; break;
       case '--thread-audit-root': options.threadAuditRoot = value; break;
       case '--profile': options.profileId = value; break;
+      case '--provider-policy': options.providerPolicyPath = value; break;
       case '--profiles': options.profilesPath = value; break;
       case '--task-kind': options.taskKind = value; break;
       case '--term': options.terms = [...(options.terms ?? []), value]; break;
@@ -295,6 +297,10 @@ try {
   const execute = options.execute === true;
   delete options.execute;
   let result;
+  if (['context-query', 'context-publish', 'progress-publish'].includes(command)) {
+    // Absent policy keeps earlier behaviour; a present but invalid one stops the command.
+    options.providerPolicy = loadProviderPolicy({ providerPolicyPath: options.providerPolicyPath });
+  }
 
   if (command === 'progress-publish') {
     const file = JSON.parse(readFileSync(options.proposalPath, 'utf8'));
@@ -319,6 +325,11 @@ try {
       : planLifecycleMigration(migrationOptions);
   } else if (command === 'doctor') {
     result = diagnoseBroker(options);
+    try {
+      result = { ...result, providerPolicy: describeProviderPolicy(loadProviderPolicy({ providerPolicyPath: options.providerPolicyPath })) };
+    } catch {
+      result = { ...result, providerPolicy: { state: 'invalid' } };
+    }
   } else if (command === 'source-attest') {
     const attestation = JSON.parse(readFileSync(options.attestationPath, 'utf8'));
     result = execute

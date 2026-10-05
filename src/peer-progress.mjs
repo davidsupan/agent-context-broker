@@ -22,6 +22,7 @@ import {
   stableValue,
   verifyEventTail
 } from './event-store.mjs';
+import { assertPublishable, policyEntry, scopeReadable } from './provider-policy.mjs';
 import { provenanceForSourceToken } from './source-attestation.mjs';
 import {
   relationsForScope,
@@ -322,6 +323,8 @@ function normalizedProposal(inputOptions) {
 function artifactFor(inputOptions) {
   const { normalized, source } = normalizedProposal(inputOptions);
   const progressId = sha256(stableJson(normalized));
+  // The provider here comes from the attested source token, not from the caller.
+  assertPublishable(inputOptions.providerPolicy, normalized.provider, normalized.scope, [normalized]);
   return {
     artifact: { ...normalized, progressId, digest: progressId },
     source
@@ -623,6 +626,14 @@ export function readPeerProgress(inputOptions = {}) {
     throw new Error('Peer progress query requires provider, roots, and an explicit scope.');
   }
   if (options.strictIsolation === true) return { progress: [], warnings: [] };
+  const rule = policyEntry(options.providerPolicy, options.provider);
+  if (rule && (rule.strictIsolation || !scopeReadable(rule, { kind: options.scopeKind, key: options.scopeKey }))) {
+    return { progress: [], warnings: ['provider-policy-denied'] };
+  }
+  if (rule?.read && options.ambientProjectKey &&
+      !scopeReadable(rule, { kind: 'project', key: options.ambientProjectKey })) {
+    options.ambientProjectKey = null;
+  }
   const now = options.now ? new Date(options.now) : new Date();
   if (Number.isNaN(now.getTime())) throw new Error('Peer progress query time is invalid.');
   const terms = [...new Set((options.terms ?? []).map((term) => String(term).trim().toLowerCase()).filter(Boolean))];
@@ -638,6 +649,7 @@ export function readPeerProgress(inputOptions = {}) {
       warnings.push('stale-peer-relation-excluded');
     }
     if (score < 0) continue;
+    if (rule?.read && !scopeReadable(rule, artifact.scope)) continue;
     if (Date.parse(artifact.expiresAt) <= now.getTime()) {
       warnings.push('expired-peer-progress-excluded');
       continue;

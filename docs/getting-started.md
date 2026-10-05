@@ -169,6 +169,7 @@ implicit project routing.
 | `AGENT_CONTEXT_BROKER_EVENT_RUNTIME` | Override the event-store root (defaults below the runtime home) |
 | `AGENT_CONTEXT_BROKER_DESCRIPTORS=1` | Allow the launcher to pass caller descriptor flags (off by default) |
 | `AGENT_CONTEXT_BROKER_TICKET_PROJECTS` | Allow-list of ticket project keys for branch-derived scope |
+| `AGENT_CONTEXT_BROKER_PROVIDER_POLICY` | Optional per-provider read and publish policy file (defaults to `provider-policy.json` in the runtime home); see [provider policy](provider-policy.md) |
 
 Caller descriptors are supplied explicitly with `--agent-kind`, `--agent-model`,
 `--agent-harness` and `--agent-instance` on `progress`, `publish` and `query`.
