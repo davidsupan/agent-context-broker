@@ -105,7 +105,7 @@ async function withLock(path, options, action) {
     } catch (error) {
       if (error?.code !== 'EEXIST') throw error;
       try {
-        if (Date.now() - statSync(path).mtimeMs > options.lockStaleMs) {
+        if (shouldReclaimLock(path, options)) {
           unlinkSync(path);
           continue;
         }
@@ -129,6 +129,26 @@ async function withLock(path, options, action) {
       if (error?.code !== 'ENOENT') throw error;
     }
   }
+}
+
+function shouldReclaimLock(path, options) {
+  const lockStat = statSync(path);
+  try {
+    const lock = JSON.parse(readFileSync(path, 'utf8'));
+    if (Number.isSafeInteger(lock?.processId) && lock.processId > 0) {
+      try {
+        process.kill(lock.processId, 0);
+        return false;
+      } catch (error) {
+        // Only a missing process proves abandonment; permission errors do not.
+        return error?.code === 'ESRCH';
+      }
+    }
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
+  }
+  // An in-progress metadata write may look empty. Preserve the grace period.
+  return Date.now() - lockStat.mtimeMs > options.lockStaleMs;
 }
 
 function boundedText(value, label, maximum, required = false) {
