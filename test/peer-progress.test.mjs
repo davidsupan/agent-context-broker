@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -106,6 +106,54 @@ afterEach(() => {
 });
 
 describe('peer progress', () => {
+  test('recovers an exited writer without waiting for the stale timeout', async () => {
+    const runtimeRoot = root('orphan-runtime');
+    const eventRuntimeRoot = root('orphan-events');
+    const sourceToken = await source(eventRuntimeRoot, 'claude-code', 'orphan');
+    const child = spawnSync(process.execPath, ['-e', 'console.log(process.pid)'], { encoding: 'utf8' });
+    assert.equal(child.status, 0);
+    const pid = Number(child.stdout.trim());
+    assert.ok(Number.isSafeInteger(pid) && pid > 0);
+    const lock = join(runtimeRoot, 'peer-progress', 'publish.lock');
+    mkdirSync(join(runtimeRoot, 'peer-progress'), { recursive: true });
+    writeFileSync(lock, JSON.stringify({ processId: pid, acquiredAt: new Date().toISOString() }));
+    const result = await publishPeerProgress({ runtimeRoot, eventRuntimeRoot, provider: 'claude-code',
+      proposal: proposal(sourceToken, 'APP-10001', 'Synthetic recovery proof'), execute: true,
+      lockTimeoutMs: 100, lockRetryMs: 5 });
+    assert.equal(result.writesEnabled, true);
+    assert.equal(existsSync(lock), false);
+    assert.equal(verifyEventStore({ runtimeRoot: eventRuntimeRoot }).events.length, 2);
+  });
+
+  test('preserves a live writer even when its lock is old', async () => {
+    const runtimeRoot = root('live-runtime');
+    const lock = join(runtimeRoot, 'peer-progress', 'publish.lock');
+    mkdirSync(join(runtimeRoot, 'peer-progress'), { recursive: true });
+    const bytes = JSON.stringify({ processId: process.pid });
+    writeFileSync(lock, bytes);
+    utimesSync(lock, new Date(0), new Date(0));
+    await assert.rejects(publishPeerProgress({ runtimeRoot, eventRuntimeRoot: root('live-events'),
+      execute: true, lockTimeoutMs: 20, lockRetryMs: 5, lockStaleMs: 0 }), /Peer progress store is busy/);
+    assert.equal(readFileSync(lock, 'utf8'), bytes);
+  });
+
+  test('fresh partial metadata stays locked; stale malformed metadata can recover', async () => {
+    const runtimeRoot = root('partial-runtime');
+    const eventRuntimeRoot = root('partial-events');
+    const sourceToken = await source(eventRuntimeRoot, 'codex', 'partial');
+    const lock = join(runtimeRoot, 'peer-progress', 'publish.lock');
+    mkdirSync(join(runtimeRoot, 'peer-progress'), { recursive: true });
+    writeFileSync(lock, '{');
+    const input = { runtimeRoot, eventRuntimeRoot, provider: 'codex', execute: true,
+      proposal: proposal(sourceToken, 'APP-10001', 'Synthetic partial write recovery'),
+      lockTimeoutMs: 20, lockRetryMs: 5 };
+    await assert.rejects(publishPeerProgress(input), /Peer progress store is busy/);
+    assert.equal(readFileSync(lock, 'utf8'), '{');
+    utimesSync(lock, new Date(0), new Date(0));
+    assert.equal((await publishPeerProgress(input)).writesEnabled, true);
+    assert.equal(existsSync(lock), false);
+  });
+
   test('plans without writes and publishes a verified artifact event', async () => {
     const runtimeRoot = root('plan-runtime');
     const eventRuntimeRoot = root('plan-events');
