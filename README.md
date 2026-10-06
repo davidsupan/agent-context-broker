@@ -99,6 +99,12 @@ bun scripts/agent-context.mjs query \
 
 Use `codex` for the retained Codex adapter. Commands plan changes by default. Add `--execute` only after reviewing the planned operation; an executed query writes the metadata-only audit described in the security model.
 
+Each returned claim carries its `sensitivity`, and the rendered context marks private claims so an agent does not copy them into shared tools.
+
+### Limit what each provider reads and publishes
+
+An optional provider policy gives each installed provider its own read and publish rules: allowed and denied scopes, a maximum sensitivity, the allowed evidence classes, and provider-specific settings. For example, one provider can publish only into a research inbox and read nothing else. Without a policy file the broker behaves exactly as before, and an invalid file fails closed. Install it with `--provider-policy <file>`; `doctor` reports its hash and rule counts. It is a guardrail for cooperating agents, not a sandbox. See [`docs/provider-policy.md`](docs/provider-policy.md).
+
 ### Inventory provider metadata
 
 The lower-level command inventories a bounded provider source. Keep source files private and use the matching provider name:
