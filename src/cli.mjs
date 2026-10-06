@@ -299,7 +299,9 @@ try {
   let result;
   if (['context-query', 'context-publish', 'progress-publish'].includes(command)) {
     // Absent policy keeps earlier behaviour; a present but invalid one stops the command.
-    options.providerPolicy = loadProviderPolicy({ providerPolicyPath: options.providerPolicyPath });
+    // The policy belongs to the store the command works on, so explicit roots select it.
+    options.providerPolicy = loadProviderPolicy({ providerPolicyPath: options.providerPolicyPath,
+      runtimeRoots: [options.runtimeRoot, options.eventRuntimeRoot] });
   }
 
   if (command === 'progress-publish') {
@@ -326,7 +328,8 @@ try {
   } else if (command === 'doctor') {
     result = diagnoseBroker(options);
     try {
-      result = { ...result, providerPolicy: describeProviderPolicy(loadProviderPolicy({ providerPolicyPath: options.providerPolicyPath })) };
+      result = { ...result, providerPolicy: describeProviderPolicy(loadProviderPolicy({ providerPolicyPath: options.providerPolicyPath,
+        runtimeRoots: [options.runtimeRoot, options.eventRuntimeRoot] })) };
     } catch {
       result = { ...result, providerPolicy: { state: 'invalid' } };
     }

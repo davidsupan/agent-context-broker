@@ -308,6 +308,31 @@ describe('peer progress', () => {
       .filter((event) => event.eventType === 'peer-progress.published').length, 0);
   });
 
+  test('CLI applies the policy of the store it works on, not of the ambient runtime home', async () => {
+    const home = root('policy-home');
+    writeFileSync(join(home, 'provider-policy.json'), `${JSON.stringify({ schemaVersion: 1,
+      providers: { codex: { publish: { allow: ['workstream:nothing-else'] } } } })}\n`, 'utf8');
+    const env = { ...process.env, AGENT_CONTEXT_BROKER_HOME: home };
+    delete env.AGENT_CONTEXT_BROKER_PROVIDER_POLICY;
+    const plan = async (runtimeRoot, eventRuntimeRoot, suffix) => {
+      const token = await source(eventRuntimeRoot, 'codex', suffix);
+      const proposalPath = join(root(`policy-input-${suffix}`), 'proposal.json');
+      writeFileSync(proposalPath, `${JSON.stringify(proposal(token, 'APP-10003', 'Store-bound policy'), null, 2)}\n`, 'utf8');
+      return spawnSync(process.execPath, [join(import.meta.dirname, '..', 'src', 'cli.mjs'), 'progress-publish',
+        '--provider', 'codex', '--proposal', proposalPath, '--runtime-root', runtimeRoot,
+        '--event-runtime-root', eventRuntimeRoot], { encoding: 'utf8', env });
+    };
+
+    // An explicit store outside the ambient home does not inherit that home's policy.
+    const elsewhere = await plan(root('policy-runtime'), root('policy-events'), 'elsewhere');
+    assert.equal(elsewhere.status, 0, elsewhere.stderr);
+
+    // The same command on the home's own store is governed by it.
+    const inside = await plan(join(home, 'runtime', 'reconciliation'), join(home, 'runtime', 'events'), 'inside');
+    assert.notEqual(inside.status, 0);
+    assert.match(inside.stderr, /Provider policy denies publication/u);
+  });
+
   test('shared Bun wrapper exposes progress publication without requiring a skill command', async () => {
     const runtimeRoot = root('wrapper-runtime');
     const eventRuntimeRoot = root('wrapper-events');

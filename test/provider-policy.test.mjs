@@ -15,6 +15,7 @@ import {
   describeProviderPolicy,
   loadProviderPolicy,
   parseProviderPolicy,
+  providerPolicyPath,
   readRestricted,
   scopeReadable
 } from '../src/provider-policy.mjs';
@@ -101,6 +102,22 @@ describe('provider policy document', () => {
     writeFileSync(explicit, JSON.stringify({ schemaVersion: 1, providers: { codex: { strictIsolation: true } } }));
     assert.equal(loadProviderPolicy({ env: { AGENT_CONTEXT_BROKER_PROVIDER_POLICY: explicit } }).providers.codex.strictIsolation, true);
     assert.equal(describeProviderPolicy(null).state, 'absent');
+  });
+
+  test('explicit runtime roots select the policy of their own runtime home', () => {
+    const home = root('store-home');
+    const ambient = root('ambient-home');
+    const file = join(home, 'provider-policy.json');
+    const standard = [join(home, 'runtime', 'reconciliation'), join(home, 'runtime', 'events')];
+    assert.equal(providerPolicyPath({ runtimeRoots: standard, env: { AGENT_CONTEXT_BROKER_HOME: ambient } }), file);
+    // Roots outside one standard home inherit no policy, so an ambient home cannot leak in.
+    assert.equal(providerPolicyPath({ runtimeRoots: [root('custom-runtime')], env: { AGENT_CONTEXT_BROKER_HOME: ambient } }), null);
+    assert.equal(providerPolicyPath({ runtimeRoots: [standard[0], join(ambient, 'runtime', 'events')], env: {} }), null);
+    assert.equal(loadProviderPolicy({ runtimeRoots: [root('custom-only')], env: {} }), null);
+    // Explicit settings still win, and no roots keep the default home.
+    assert.equal(providerPolicyPath({ runtimeRoots: [root('custom-runtime-2')],
+      env: { AGENT_CONTEXT_BROKER_PROVIDER_POLICY: join(ambient, 'p.json') } }), resolve(join(ambient, 'p.json')));
+    assert.equal(providerPolicyPath({ runtimeRoots: [], env: { AGENT_CONTEXT_BROKER_HOME: ambient } }), join(ambient, 'provider-policy.json'));
   });
 
   test('read rules are an allow-list with deny precedence and case-insensitive globs', () => {

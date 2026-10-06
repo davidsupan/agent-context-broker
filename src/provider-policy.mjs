@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 
 import { sha256 } from './event-store.mjs';
 import { defaultRuntimeHome } from './platform-paths.mjs';
@@ -82,17 +82,37 @@ export function parseProviderPolicy(text) {
   });
 }
 
+// A store in the standard layout lives at `<runtime home>/runtime/<store>`.
+function storeHome(root) {
+  const parent = dirname(root);
+  return basename(parent).toLowerCase() === 'runtime' ? dirname(parent) : null;
+}
+
+/**
+ * The policy file that governs a command, or null when none applies. The policy belongs to
+ * the store a command works on: explicit `runtimeRoots` in the standard layout select their
+ * runtime home, and explicit roots outside one standard home inherit no policy (an explicit
+ * path or AGENT_CONTEXT_BROKER_PROVIDER_POLICY still applies). Without explicit roots the
+ * default runtime home is used, as before.
+ */
 export function providerPolicyPath(options = {}) {
   if (options.providerPolicyPath) return resolve(options.providerPolicyPath);
   const env = options.env ?? process.env;
   if (env.AGENT_CONTEXT_BROKER_PROVIDER_POLICY?.trim()) return resolve(env.AGENT_CONTEXT_BROKER_PROVIDER_POLICY);
-  return join(options.runtimeHome ?? defaultRuntimeHome({ env }), POLICY_FILE);
+  if (options.runtimeHome) return join(options.runtimeHome, POLICY_FILE);
+  const roots = (options.runtimeRoots ?? []).filter(Boolean).map((root) => resolve(root));
+  if (roots.length) {
+    const homes = new Set(roots.map(storeHome));
+    if (homes.size !== 1 || homes.has(null)) return null;
+    return join([...homes][0], POLICY_FILE);
+  }
+  return join(defaultRuntimeHome({ env }), POLICY_FILE);
 }
 
-/** Returns null when no policy file exists; throws on a present but invalid file. */
+/** Returns null when no policy file applies or exists; throws on a present but invalid file. */
 export function loadProviderPolicy(options = {}) {
   const path = providerPolicyPath(options);
-  if (!existsSync(path)) return null;
+  if (path === null || !existsSync(path)) return null;
   const stat = statSync(path);
   if (!stat.isFile() || stat.size > MAX_POLICY_BYTES) throw invalid();
   return Object.freeze({ ...parseProviderPolicy(readFileSync(path, 'utf8')), path });

@@ -10,6 +10,8 @@ The policy is optional. Without the file, nothing changes.
 2. `AGENT_CONTEXT_BROKER_PROVIDER_POLICY`.
 3. `<runtime home>/provider-policy.json`. The installer writes it here when given `--provider-policy <file>`.
 
+The policy belongs to the store a command works on. When a command is given `--runtime-root` or `--event-runtime-root` in the standard `<runtime home>/runtime/<store>` layout, step 3 uses that runtime home. Explicit roots outside one standard home inherit no policy, unless step 1 or 2 names one. Without explicit roots, the default runtime home (`AGENT_CONTEXT_BROKER_HOME` or the platform default) is used.
+
 The installer validates the file, then plans, backs up and verifies it like any other target. `remove` and `rollback` restore the state that existed before the install.
 
 `doctor` reports a bounded summary: the hash, plus rule counts per provider.
