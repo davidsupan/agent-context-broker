@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 // Re-verifies an archive written by archive-corpus.mjs, independently of the manifest's
 // own verdict.
 //

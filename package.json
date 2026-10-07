@@ -1,6 +1,6 @@
 {
   "name": "agent-context-broker",
-  "version": "0.11.0-beta.3",
+  "version": "0.12.0-beta.1",
   "description": "A local-first, metadata-only context broker for coding agents.",
   "author": "David Supan",
   "license": "Apache-2.0",
@@ -21,9 +21,9 @@
   },
   "homepage": "https://davidsupan.github.io/agent-context-broker/",
   "engines": {
+    "node": ">=24.2.0",
     "bun": ">=1.4.0 <2"
   },
-  "packageManager": "bun@1.4.1",
   "type": "module",
   "files": [
     "adapters",
@@ -49,9 +49,11 @@
     "agent-context-broker-install": "scripts/manage-agent-context-broker-installation.mjs"
   },
   "scripts": {
-    "check": "bun scripts/check-package.mjs",
-    "check:installed": "bun scripts/check-package.mjs --installed",
-    "test": "bun test --timeout 60000 test providers/codex/test providers/claude-code/test",
-    "validate": "bun run check && bun run test"
+    "check": "node scripts/check-package.mjs",
+    "check:installed": "node scripts/check-package.mjs --installed",
+    "test": "node --test --test-timeout=60000 \"test/**/*.test.mjs\" \"providers/codex/test/**/*.test.mjs\" \"providers/claude-code/test/**/*.test.mjs\"",
+    "test:bun": "bun test --timeout 60000 test providers/codex/test providers/claude-code/test",
+    "validate": "npm run check && npm run test",
+    "validate:bun": "bun scripts/check-package.mjs && npm run test:bun"
   }
 }

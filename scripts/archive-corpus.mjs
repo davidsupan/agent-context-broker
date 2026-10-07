@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 // Archives an agent transcript corpus with a per-file round-trip proof.
 //
 // Originals are never modified or removed. For every file the archive records the
@@ -32,6 +32,7 @@ import { basename, join, relative, resolve } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { PassThrough } from 'node:stream';
 import { constants, createZstdCompress, createZstdDecompress } from 'node:zlib';
+import { runtimeInfo } from '../src/runtime.mjs';
 
 function parseArgs(argv) {
   const options = { level: 9, minAgeHours: 24, limit: Infinity, execute: false };
@@ -183,7 +184,7 @@ for (const path of candidates) {
     roundTrip: ok ? 'verified' : 'failed',
     level: options.level,
     codec: 'node-zlib-zstd-stream',
-    runtime: 'bun-' + Bun.version,
+    runtime: `${runtimeInfo().name}-${runtimeInfo().version}`,
     archivedAt: new Date().toISOString()
   }) + '\n', { flag: 'a' });
 }

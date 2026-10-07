@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 // Measures what a per-prompt peer-progress read costs as the event store grows:
 // a full chain verification versus a bounded tail read. Not a test; run manually.
 import { randomUUID } from 'node:crypto';

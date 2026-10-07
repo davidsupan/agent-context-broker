@@ -19,11 +19,11 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84a9d0b1ee37b7c3e # v4
         with:
-          bun-version: 1.4.1
-      - run: bun run validate
-      - run: bun pm pack --dry-run
+          node-version: 24
+      - run: npm run validate
+      - run: npm pack --dry-run
       - run: sh -n scripts/*.sh
       - run: ./scripts/test-shell-installation.sh
 
@@ -33,13 +33,13 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84a9d0b1ee37b7c3e # v4
         with:
-          bun-version: 1.4.1
+          node-version: 24
       - shell: bash
-        run: bun run validate
+        run: npm run validate
       - shell: bash
-        run: bun pm pack --dry-run
+        run: npm pack --dry-run
 
   test-macos:
     name: test-macos
@@ -47,10 +47,23 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84a9d0b1ee37b7c3e # v4
+        with:
+          node-version: 24
+      - run: npm run validate
+      - run: npm pack --dry-run
+      - run: sh -n scripts/*.sh
+      - run: ./scripts/test-shell-installation.sh
+
+  # Bun stays supported for this release; the next minor drops it.
+  test-bun:
+    name: test-bun
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.4.1
-      - run: bun run validate
-      - run: bun pm pack --dry-run
-      - run: sh -n scripts/*.sh
-      - run: ./scripts/test-shell-installation.sh
+      - run: bun run validate:bun
+      - run: AGENT_CONTEXT_BROKER_RUNTIME=bun ./scripts/test-shell-installation.sh

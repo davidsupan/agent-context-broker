@@ -1,9 +1,10 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 // Probes what zstd can actually do here before the archive design commits to it.
 // Uses the Bun-native API, which is what the rest of this repo uses, and cross-checks
 // it against the node:zlib shim so the archive does not depend on which one wrote it.
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { constants, zstdCompressSync, zstdDecompressSync } from 'node:zlib';
 
 const sample = process.argv[2];
 const capMb = Number(process.argv[3] ?? 32);
@@ -36,9 +37,9 @@ console.log('------|--------|----------|-----------|-----------');
 let best = null;
 for (const level of [3, 9, 19]) {
   const started = performance.now();
-  const packed = Bun.zstdCompressSync(input, { level });
+  const packed = zstdCompressSync(input, { params: { [constants.ZSTD_c_compressionLevel]: level } });
   const elapsed = performance.now() - started;
-  const back = Bun.zstdDecompressSync(packed);
+  const back = zstdDecompressSync(packed);
   const identical = Buffer.compare(Buffer.from(back), input) === 0;
   console.log(
     String(level).padStart(5) + ' | ' +
@@ -52,7 +53,7 @@ for (const level of [3, 9, 19]) {
 
 console.log('');
 // The archive must be reproducible, or "verify by re-compressing" is not available.
-const again = Bun.zstdCompressSync(input, { level: 19 });
+const again = zstdCompressSync(input, { params: { [constants.ZSTD_c_compressionLevel]: 19 } });
 console.log('deterministic at level 19      : ' + (Buffer.compare(best, again) === 0));
 
 // And it must not matter which implementation produced the file.
@@ -61,8 +62,8 @@ const viaZlib = zlib.zstdCompressSync(input, {
   params: { [zlib.constants.ZSTD_c_compressionLevel]: 19 }
 });
 const crossOk = Buffer.compare(
-  Buffer.from(Bun.zstdDecompressSync(viaZlib)),
+  Buffer.from((globalThis.Bun?.zstdDecompressSync ?? zlib.zstdDecompressSync)(viaZlib)),
   input
 ) === 0;
-console.log('node:zlib output reads in Bun  : ' + crossOk);
+console.log((globalThis.Bun ? 'node:zlib output reads in Bun  : ' : 'node:zlib round trip            : ') + crossOk);
 console.log('byte-identical across the two  : ' + (Buffer.compare(best, viaZlib) === 0));

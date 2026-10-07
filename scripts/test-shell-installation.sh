@@ -3,6 +3,11 @@ set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PACKAGE_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
+RUNTIME=${AGENT_CONTEXT_BROKER_RUNTIME:-}
+if [ -z "$RUNTIME" ]; then
+  if command -v node >/dev/null 2>&1; then RUNTIME=node; else RUNTIME=bun; fi
+fi
+export AGENT_CONTEXT_BROKER_RUNTIME="$RUNTIME"
 CASE_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/acb-shell-install.XXXXXX")
 trap 'rm -rf -- "$CASE_ROOT"' EXIT HUP INT TERM
 
@@ -23,8 +28,8 @@ PLAN=$(
     --runtime-home "$RUNTIME_HOME"
 )
 
-DIGESTS=$(printf '%s' "$PLAN" | bun -e '
-  const plan = await Bun.stdin.json();
+DIGESTS=$(printf '%s' "$PLAN" | "$RUNTIME" -e '
+  const plan = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
   if (plan.writesEnabled !== false) throw new Error("Install plan unexpectedly enables writes.");
   process.stdout.write(`${plan.manifestDigest}\t${plan.planDigest}`);
 ')
@@ -43,10 +48,10 @@ PLAN_DIGEST=${DIGESTS#*	}
   --execute >/dev/null
 
 "$SCRIPT_DIR/test-agent-context-broker-installation.sh" \
-  --runtime-home "$RUNTIME_HOME" | bun -e '
-    const result = await Bun.stdin.json();
+  --runtime-home "$RUNTIME_HOME" | "$RUNTIME" -e '
+    const result = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
     if (!result.healthy) throw new Error("Installed broker is not healthy.");
-    if (result.runtime?.name !== "bun") throw new Error("Installed runtime is not Bun.");
+    if (result.runtime?.name !== process.env.AGENT_CONTEXT_BROKER_RUNTIME) throw new Error("Installed runtime is not the selected one.");
   '
 
 if grep -Eiq 'powershell|pwsh' "$CODEX_HOME/hooks.json" "$CLAUDE_HOME/settings.json"; then
@@ -66,8 +71,8 @@ REMOVE_PLAN=$(
     --claude-home "$CLAUDE_HOME" \
     --runtime-home "$RUNTIME_HOME"
 )
-REMOVE_DIGEST=$(printf '%s' "$REMOVE_PLAN" | bun -e '
-  const plan = await Bun.stdin.json();
+REMOVE_DIGEST=$(printf '%s' "$REMOVE_PLAN" | "$RUNTIME" -e '
+  const plan = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
   if (plan.writesEnabled !== false) throw new Error("Remove plan unexpectedly enables writes.");
   process.stdout.write(plan.planDigest);
 ')

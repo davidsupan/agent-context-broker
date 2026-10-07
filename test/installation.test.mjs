@@ -6,10 +6,9 @@ import {
   mkdirSync,
   readFileSync,
   rmSync,
-  writeFileSync
-} from 'node:fs';
+  writeFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, extname, dirname, join, resolve  } from 'node:path';
 import { afterEach, describe, test } from 'node:test';
 
 import {
@@ -56,7 +55,7 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { force: true, recursive: true });
 });
 
-describe('Bun installation manager', () => {
+describe('installation manager', () => {
   test('installed payload includes corpus commands, documentation and passes runtime validation', () => {
     const root = testRoot('complete-payload');
     executeInstall(options(root));
@@ -77,7 +76,8 @@ describe('Bun installation manager', () => {
 
     assert.equal(plan.action, 'Install');
     assert.equal(plan.writesEnabled, false);
-    assert.match(plan.bunVersion, /^1\.4\./u);
+    assert.equal(plan.runtime.name, globalThis.Bun ? 'bun' : 'node');
+    assert.equal(plan.runtime.path, realpathSync(process.execPath));
     assert.equal(plan.execution.expectedManifestDigest, plan.manifestDigest);
     assert.equal(plan.execution.expectedPlanDigest, plan.planDigest);
     assert.equal(existsSync(root), false);
@@ -98,7 +98,7 @@ describe('Bun installation manager', () => {
     assert.equal(existsSync(join(root, 'runtime', 'install-state.json')), false);
   });
 
-  test('installs direct Bun hooks, verifies them, and preserves existing handlers', () => {
+  test('installs direct runtime hooks, verifies them, and preserves existing handlers', () => {
     const root = testRoot('install');
     const input = options(root);
     mkdirSync(input.codexHome, { recursive: true });
@@ -113,11 +113,11 @@ describe('Bun installation manager', () => {
     const commands = codex.hooks.SessionStart.flatMap((group) => group.hooks)
       .map((hook) => hook.command);
 
-    assert.equal(state.runtime.name, 'bun');
-    assert.match(state.runtime.version, /^1\.4\./u);
+    assert.equal(state.runtime.name, globalThis.Bun ? 'bun' : 'node');
+    assert.equal(state.runtime.version, globalThis.Bun ? globalThis.Bun.version : process.versions.node);
     assert.equal(verification.healthy, true);
     assert.ok(commands.includes('existing-handler'));
-    assert.ok(commands.some((command) => command.includes('bun') && command.includes('cli.mjs')));
+    assert.ok(commands.some((command) => command.includes(basename(process.execPath, extname(process.execPath))) && command.includes('cli.mjs')));
     assert.equal(commands.some((command) => /pwsh|powershell/iu.test(command)), false);
 
     const cli = join(input.installRoot, 'tool', 'providers', 'codex', 'src', 'cli.mjs');

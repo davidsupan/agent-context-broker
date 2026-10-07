@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 // Extracts the operator and assistant text of selected sessions into plain files, so the
 // model-assisted distillation step reads a bounded, pre-filtered input instead of raw
 // transcripts.

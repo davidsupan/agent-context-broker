@@ -1,10 +1,12 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 
 import { existsSync, lstatSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, extname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { assertSupportedBun } from '../src/installation.mjs';
+import { spawnSync } from 'node:child_process';
+
+import { assertSupportedRuntime, runtimeInfo } from '../src/runtime.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
@@ -91,7 +93,7 @@ function slash(path) {
   return relative(root, path).split(sep).join('/');
 }
 
-assertSupportedBun();
+assertSupportedRuntime();
 for (const file of requiredFiles) {
   // Repository governance and the website are not part of the installed runtime.
   if (installed && (file === '.editorconfig' || file.startsWith('.github/') || file.startsWith('site/'))) continue;
@@ -102,7 +104,7 @@ for (const file of requiredFiles) {
 const files = walk(root);
 const powershellFiles = files.filter((path) => extname(path).toLowerCase() === '.ps1');
 if (powershellFiles.length > 0) {
-  throw new Error(`PowerShell files are not allowed in the Bun-only package: ${powershellFiles.map(slash).join(', ')}`);
+  throw new Error(`PowerShell files are not allowed in the package: ${powershellFiles.map(slash).join(', ')}`);
 }
 
 const textFiles = files.filter((path) => textExtensions.has(extname(path).toLowerCase()));
@@ -118,9 +120,15 @@ for (const file of files.filter((path) => extname(path).toLowerCase() === '.json
   JSON.parse(readFileSync(file, 'utf8'));
 }
 
-const transpiler = new Bun.Transpiler({ loader: 'js', target: 'bun' });
+// Syntax check of every module without running it: Bun's transpiler, or Node's --check.
+const transpiler = globalThis.Bun ? new globalThis.Bun.Transpiler({ loader: 'js', target: 'bun' }) : null;
 for (const file of files.filter((path) => extname(path).toLowerCase() === '.mjs')) {
-  transpiler.transformSync(readFileSync(file, 'utf8'));
+  if (transpiler) {
+    transpiler.transformSync(readFileSync(file, 'utf8'));
+  } else {
+    const result = spawnSync(process.execPath, ['--check', file], { encoding: 'utf8' });
+    if (result.status !== 0) throw new Error(`Syntax check failed: ${slash(file)}\n${result.stderr}`);
+  }
 }
 
 for (const file of files.filter((path) => extname(path).toLowerCase() === '.sh')) {
@@ -130,8 +138,9 @@ for (const file of files.filter((path) => extname(path).toLowerCase() === '.sh')
 }
 
 const packageManifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
-if (packageManifest.engines?.bun !== '>=1.4.0 <2') throw new Error('The package must require Bun 1.4.');
-if (packageManifest.packageManager !== 'bun@1.4.1') throw new Error('The package manager must pin Bun 1.4.1.');
+if (packageManifest.engines?.node !== '>=24.2.0') throw new Error('The package must require Node 24.2.');
+if (packageManifest.engines?.bun !== '>=1.4.0 <2') throw new Error('The package must still accept Bun 1.4.');
+if ('packageManager' in packageManifest) throw new Error('The package must not pin a package manager.');
 if (packageManifest.homepage !== 'https://davidsupan.github.io/agent-context-broker/') {
   throw new Error('The package homepage must point to the GitHub Pages project site.');
 }
@@ -227,7 +236,7 @@ if (!siteMap.includes('<loc>https://davidsupan.github.io/agent-context-broker/</
 process.stdout.write(`${JSON.stringify({
   package: packageManifest.name,
   version: packageManifest.version,
-  runtime: `bun ${globalThis.Bun.version}`,
+  runtime: `${runtimeInfo().name} ${runtimeInfo().version}`,
   files: files.length,
   textFiles: textFiles.length,
   powershellFiles: 0,

@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 // Backfills the codec label on manifest entries written before the field existed.
 //
 // The label is not assumed from run history: for each unlabelled entry it re-compresses
@@ -33,7 +33,10 @@ function parseArgs(argv) {
 const sha = (bytes) => createHash('sha256').update(bytes).digest('hex');
 
 const candidates = [
-  { codec: 'bun-zstd-buffered', pack: (bytes, level) => Bun.zstdCompressSync(bytes, { level }) },
+  // Bun's own codec is measured only where it exists; node:zlib is the one archives use.
+  ...(globalThis.Bun?.zstdCompressSync
+    ? [{ codec: 'bun-zstd-buffered', pack: (bytes, level) => globalThis.Bun.zstdCompressSync(bytes, { level }) }]
+    : []),
   {
     codec: 'node-zlib-zstd-buffered',
     pack: (bytes, level) => zstdCompressSync(bytes, {

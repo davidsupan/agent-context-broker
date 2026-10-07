@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 // Audits an ingested event store against the properties a backfill must hold:
 // bi-temporal separation (valid time from the source, transaction time from the run)
 // and the absence of raw conversation text in any stored payload.
