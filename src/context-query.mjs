@@ -104,7 +104,7 @@ function acceptedScopeRelations(options) {
   return keys;
 }
 
-function scopeRelation(scopeKind, scopeKey) {
+export function scopeRelation(scopeKind, scopeKey) {
   return `${scopeKind}:${hash(String(scopeKey).toLowerCase())}`;
 }
 
@@ -218,7 +218,8 @@ function normalizedTerms(values, options) {
   return terms;
 }
 
-function verifiedClaim(root, expectedClaimId, maxValueBytes, now) {
+/** One accepted claim, hash-verified; throws when any field or hash does not hold. */
+export function verifiedClaim(root, expectedClaimId, maxValueBytes, now) {
   const claim = readJson(join(root, 'claims', `${expectedClaimId}.json`));
   noUnknownFields(claim, CLAIM_FIELDS, 'Accepted claim');
   if (claim.schemaVersion !== 1 || claim.claimId !== expectedClaimId ||
@@ -259,7 +260,12 @@ function verifiedClaim(root, expectedClaimId, maxValueBytes, now) {
   };
 }
 
-function verifiedSnapshot(root, registryEntry, profile, options, now) {
+/**
+ * One accepted snapshot file, hash-verified against its registry entry; no scope check, no claims read.
+ * @param {string} root
+ * @param {any} registryEntry an entry of accepted-snapshots.json, validated here
+ */
+export function verifiedSnapshotFile(root, registryEntry) {
   if (!SNAPSHOT_ID.test(String(registryEntry?.snapshotId ?? ''))) {
     throw new Error('Accepted snapshot registry contains an invalid identifier.');
   }
@@ -279,6 +285,11 @@ function verifiedSnapshot(root, registryEntry, profile, options, now) {
       !validReferences(snapshot.canonicalRefs)) {
     throw new Error('Accepted snapshot verification failed.');
   }
+  return snapshot;
+}
+
+function verifiedSnapshot(root, registryEntry, profile, options, now) {
+  const snapshot = verifiedSnapshotFile(root, registryEntry);
   // Fail-closed: the snapshot must still carry a relation the query accepts. The accepted
   // set is the primary scope plus relations derived from trusted ledger files, so this
   // broadens what is in scope without weakening the gate itself.
