@@ -10,7 +10,7 @@ import {
   planCorrectionDecision,
   planCorrectionProposal,
   proposeCorrection
-} from '../src/corrections.mjs';
+} from '../src/corrections.mts';
 import { sha256, verifyEventStore } from '../src/event-store.mjs';
 
 const roots = [];

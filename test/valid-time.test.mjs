@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-import { lifecycleOutboxEntry, observedAtFor } from '../src/lifecycle-events.mjs';
+import { lifecycleOutboxEntry, observedAtFor } from '../src/lifecycle-events.mts';
 
 const RUN_TIME = '2026-09-14T15:00:00.000Z';
 

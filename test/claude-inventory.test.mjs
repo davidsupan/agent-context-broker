@@ -15,7 +15,7 @@ import {
   planInventory,
   readSourceIdentity,
   runInventory
-} from '../src/claude-inventory.mjs';
+} from '../src/claude-inventory.mts';
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const fixture = join(packageRoot, 'fixtures', 'claude-active.jsonl');

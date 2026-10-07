@@ -62,7 +62,8 @@ The sources are moving from JavaScript (`.mjs`) to TypeScript (`.mts`) one modul
 - A `.mts` file must be clean under `strict`. The baseline never holds an error in one.
 - A file that the runtime names by path stays a thin `.mjs` entry point that imports its `.mts` logic. That covers `src/cli.mjs`, the provider bridges and CLIs, the scripts the launchers and installer start, and the required files in `scripts/check-package.mjs`.
 - The package ships JavaScript only. `npm run build` stages `build/package`, strips every `.mts` to `.mjs` with line numbers kept, and rewrites the imports. Release with `npm run pack:package`, never with a plain `npm pack` of the source tree.
-- Tests stay `.mjs` and run against the sources. The `test-package` job runs the same tests against the staged package.
+- A string that names a module file as data, such as a bridge's `adapterModule`, keeps the installed `.mjs` name. Only import specifiers are rewritten, and the loader falls back to the `.mts` source in a checkout.
+- Tests stay `.mjs` and run against the sources. The `test-package` job runs the same tests against the staged package. Run it locally before a migration commit: `npm run build`, then `node scripts/check-package.mjs --installed` and `npm test` in `build/package`.
 
 ## Keep data safe
 

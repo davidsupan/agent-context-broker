@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { afterEach, describe, test } from 'node:test';
 
 import { appendBrokerEvent, sha256 } from '../src/event-store.mjs';
-import { planReadModel, projectReadModel } from '../src/read-model.mjs';
+import { planReadModel, projectReadModel } from '../src/read-model.mts';
 
 const roots = [];
 

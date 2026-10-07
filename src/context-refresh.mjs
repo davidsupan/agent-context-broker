@@ -9,8 +9,8 @@ import {
 } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 
-import * as claudeCode from './claude-inventory.mjs';
-import * as codex from './codex-inventory-v2.mjs';
+import * as claudeCode from './claude-inventory.mts';
+import * as codex from './codex-inventory-v2.mts';
 
 const ADAPTERS = Object.freeze({ codex, 'claude-code': claudeCode });
 const HASH = /^[a-f0-9]{64}$/u;

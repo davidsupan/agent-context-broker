@@ -21,7 +21,7 @@ import {
   attestSource,
   planSourceAttestation,
   provenanceForSourceToken
-} from '../src/source-attestation.mjs';
+} from '../src/source-attestation.mts';
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const fixtures = join(packageRoot, 'fixtures');
@@ -83,7 +83,7 @@ describe('provider-neutral lifecycle consumer', () => {
     const root = tempRoot('codex');
     const runtime = join(root, 'runtime', 'codex');
     const source = fixture(root, 'codex-active.jsonl');
-    const codex = await import('../src/codex-inventory-v2.mjs');
+    const codex = await import('../src/codex-inventory-v2.mts');
     const identity = await codex.readSourceIdentity(source);
     const accepted = join(root, 'accepted.json');
     writeFileSync(accepted, `${JSON.stringify({

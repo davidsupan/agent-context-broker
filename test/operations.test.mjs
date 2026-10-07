@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { afterEach, describe, test } from 'node:test';
 
 import { verifyEventStore } from '../src/event-store.mjs';
-import { projectReadModel } from '../src/read-model.mjs';
+import { projectReadModel } from '../src/read-model.mts';
 import {
   diagnoseBroker,
   migrateLifecycleLedger,

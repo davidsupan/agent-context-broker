@@ -2,9 +2,18 @@ import { existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 import { appendBrokerEvents, sha256, stableJson, verifyEventTail } from './event-store.mjs';
-import { attestSource, planSourceAttestation } from './source-attestation.mjs';
+import { attestSource, planSourceAttestation } from './source-attestation.mts';
+import type { SourceAttestation } from './source-attestation.mts';
 
-export function sourceAttestation(provider, source, observedAt) {
+export type LifecycleSource = { sourceId: string; sessionIdHash: string; generation: number; nextOffset: number; contentChainHash: string; relationKeys: string[]; lastEventAt?: string | null };
+export type LifecycleDelta = { deltaId: string; sourceId: string; classification: string; expiresAt: string | null; appendedBytes: number; threadState: string };
+export type LifecycleInventory = { provider: SourceAttestation['provider']; generatedAt: string; runId: string; sources: LifecycleSource[] };
+export type LifecycleOutbox = { schemaVersion: number; runId: string; inventoryHash: string; attestations: SourceAttestation[]; events: ReturnType<typeof deltaEvent>[] };
+export type PersistLifecycleOptions = { inventory: LifecycleInventory; deltas: LifecycleDelta[]; lifecycleRuntimeRoot: string; atomicWriter: (path: string, value: string) => void };
+export type DeliverLifecycleOptions = { lifecycleRuntimeRoot: string; eventRuntimeRoot: string; atomicWriter: (path: string, value: string) => void; allowGenesis?: boolean };
+export type LifecycleDelivery = { deliveredEntries: number; deliveredEvents: number; attestedSubjectRefs: string[] };
+
+export function sourceAttestation(provider: LifecycleInventory['provider'], source: LifecycleSource, observedAt: string): SourceAttestation {
   return {
     schemaVersion: 1,
     provider,
@@ -21,7 +30,7 @@ export function sourceAttestation(provider, source, observedAt) {
   };
 }
 
-function deltaEvent(provider, delta, source, attestation, observedAt) {
+function deltaEvent(provider: LifecycleInventory['provider'], delta: LifecycleDelta, source: LifecycleSource, attestation: SourceAttestation, observedAt: string) {
   return {
     idempotencyKey: sha256(`thread-delta:${delta.deltaId}`),
     eventType: 'thread.delta',
@@ -59,14 +68,14 @@ function deltaEvent(provider, delta, source, attestation, observedAt) {
 // makes months-old threads look freshly observed; a backfill then outranks current
 // context. The source's own newest record is the honest answer, and for a live session
 // it is seconds old, so live behaviour is unchanged.
-export function observedAtFor(source, fallback) {
+export function observedAtFor(source: LifecycleSource | undefined, fallback: string): string {
   const candidate = source?.lastEventAt;
   return typeof candidate === 'string' && !Number.isNaN(Date.parse(candidate))
     ? new Date(candidate).toISOString()
     : fallback;
 }
 
-export function lifecycleOutboxEntry(inventory, deltas) {
+export function lifecycleOutboxEntry(inventory: LifecycleInventory, deltas: LifecycleDelta[]): LifecycleOutbox {
   const sources = new Map(inventory.sources.map((source) => [source.sourceId, source]));
   const attestations = inventory.sources.map((source) =>
     sourceAttestation(inventory.provider, source, observedAtFor(source, inventory.generatedAt))
@@ -83,14 +92,14 @@ export function lifecycleOutboxEntry(inventory, deltas) {
     events: deltas.map((delta) => deltaEvent(
       inventory.provider,
       delta,
-      sources.get(delta.sourceId),
-      bySource.get(delta.sourceId),
+      sources.get(delta.sourceId)!,
+      bySource.get(delta.sourceId)!,
       observedAtFor(sources.get(delta.sourceId), inventory.generatedAt)
     ))
   };
 }
 
-export function persistLifecycleOutbox(inputOptions) {
+export function persistLifecycleOutbox(inputOptions: PersistLifecycleOptions): string | null {
   const entry = lifecycleOutboxEntry(inputOptions.inventory, inputOptions.deltas);
   if (entry.attestations.length === 0 && entry.events.length === 0) return null;
   const path = join(
@@ -107,12 +116,14 @@ export function persistLifecycleOutbox(inputOptions) {
 // or the head it left behind. A file name alone is not evidence - a receipt for an entry
 // that delivered nothing says nothing about the store - while a receipt that cannot be
 // read is treated as proof, because failing closed is the whole point of this guard.
-function receiptsProveChain(deliveredRoot) {
+function receiptsProveChain(deliveredRoot: string): boolean {
   if (!existsSync(deliveredRoot)) return false;
   return readdirSync(deliveredRoot).some((name) => {
     if (!/^[a-f0-9]{64}\.json$/u.test(name)) return false;
     try {
-      const receipt = JSON.parse(readFileSync(join(deliveredRoot, name), 'utf8'));
+      const parsedReceipt: unknown = JSON.parse(readFileSync(join(deliveredRoot, name), 'utf8'));
+      const receipt = parsedReceipt !== null && typeof parsedReceipt === 'object'
+        ? parsedReceipt as { headEventId?: unknown; eventIds?: unknown } : null;
       return typeof receipt?.headEventId === 'string' ||
         (Array.isArray(receipt?.eventIds) && receipt.eventIds.length > 0);
     } catch {
@@ -121,7 +132,7 @@ function receiptsProveChain(deliveredRoot) {
   });
 }
 
-export async function deliverLifecycleOutbox(inputOptions) {
+export async function deliverLifecycleOutbox(inputOptions: DeliverLifecycleOptions): Promise<LifecycleDelivery> {
   const lifecycleRoot = resolve(inputOptions.lifecycleRuntimeRoot);
   const pendingRoot = join(lifecycleRoot, 'event-outbox', 'pending');
   if (!existsSync(pendingRoot)) {
@@ -145,7 +156,7 @@ export async function deliverLifecycleOutbox(inputOptions) {
   mkdirSync(join(lifecycleRoot, 'event-outbox', 'delivered'), { recursive: true });
   let deliveredEntries = 0;
   let deliveredEvents = 0;
-  const attestedSubjectRefs = new Set();
+  const attestedSubjectRefs = new Set<string>();
   const entries = readdirSync(pendingRoot, { withFileTypes: true })
     .filter((entry) => entry.isFile() && /^[a-f0-9]{64}\.json$/u.test(entry.name))
     .sort((left, right) => left.name.localeCompare(right.name));

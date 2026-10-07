@@ -16,6 +16,22 @@
 // what it says.
 import { createHash } from 'node:crypto';
 
+export type AgentDescriptorInput = {
+  kind?: unknown;
+  harness?: unknown;
+  harnessVersion?: unknown;
+  model?: unknown;
+  instanceId?: unknown;
+};
+export type AgentDescriptor = Readonly<{
+  kind: string;
+  harness: string | null;
+  harnessVersion: string | null;
+  model: string | null;
+  instanceHash: string | null;
+  attestation: 'self-declared';
+}>;
+
 export const AGENT_KINDS = Object.freeze(new Set([
   // A human is in the loop, typing turns.
   'interactive',
@@ -32,11 +48,11 @@ const FIELDS = Object.freeze(new Set(['kind', 'harness', 'harnessVersion', 'mode
 const SAFE_TOKEN = /^[A-Za-z0-9][A-Za-z0-9._@:+-]{0,63}$/u;
 const HASH = /^[a-f0-9]{64}$/u;
 
-function sha256(value) {
+function sha256(value: unknown): string {
   return createHash('sha256').update(String(value), 'utf8').digest('hex');
 }
 
-function token(value, label, max) {
+function token(value: unknown, label: string, max: number): string | null {
   if (value === undefined || value === null) return null;
   const text = String(value).trim();
   if (text.length === 0) return null;
@@ -52,7 +68,7 @@ function token(value, label, max) {
  * Returns null when no descriptor is supplied, so every call site stays optional and
  * existing proposals keep working unchanged.
  */
-export function normalizeAgentDescriptor(input) {
+export function normalizeAgentDescriptor(input: unknown): AgentDescriptor | null {
   if (input === undefined || input === null) return null;
   if (typeof input !== 'object' || Array.isArray(input)) {
     throw new Error('Agent descriptor must be an object.');
@@ -60,14 +76,15 @@ export function normalizeAgentDescriptor(input) {
   for (const key of Object.keys(input)) {
     if (!FIELDS.has(key)) throw new Error(`Agent descriptor field "${key}" is not allowed.`);
   }
-  const kind = input.kind === undefined || input.kind === null ? 'unknown' : String(input.kind);
+  const candidate = input as AgentDescriptorInput;
+  const kind = candidate.kind === undefined || candidate.kind === null ? 'unknown' : String(candidate.kind);
   if (!AGENT_KINDS.has(kind)) throw new Error('Agent descriptor kind is invalid.');
 
   // The raw instance id never lands in the store. It can carry a pid, a path or a session
   // id, so it is hashed on the way in and only the hash is kept.
-  const instanceId = input.instanceId === undefined || input.instanceId === null
+  const instanceId = candidate.instanceId === undefined || candidate.instanceId === null
     ? null
-    : String(input.instanceId).trim();
+    : String(candidate.instanceId).trim();
   if (instanceId !== null && instanceId.length === 0) {
     throw new Error('Agent descriptor instanceId is invalid.');
   }
@@ -77,13 +94,13 @@ export function normalizeAgentDescriptor(input) {
 
   const descriptor = {
     kind,
-    harness: token(input.harness, 'harness', 32),
-    harnessVersion: token(input.harnessVersion, 'harnessVersion', 32),
-    model: token(input.model, 'model', 64),
+    harness: token(candidate.harness, 'harness', 32),
+    harnessVersion: token(candidate.harnessVersion, 'harnessVersion', 32),
+    model: token(candidate.model, 'model', 64),
     instanceHash: instanceId === null ? null : sha256(`agent-instance:${instanceId}`),
     // Stated by the caller about itself, checked by nobody. Recorded so a reader is never
     // tempted to treat the rest of this object as established fact.
-    attestation: 'self-declared'
+    attestation: 'self-declared' as const
   };
   return Object.freeze(descriptor);
 }
@@ -92,20 +109,21 @@ export function normalizeAgentDescriptor(input) {
  * Confirms a descriptor read back from storage still has the shape this module writes,
  * so a hand-edited record cannot smuggle prose or extra fields into a payload.
  */
-export function isStoredAgentDescriptor(value) {
+export function isStoredAgentDescriptor(value: unknown): value is AgentDescriptor | null | undefined {
   if (value === null || value === undefined) return true;
   if (typeof value !== 'object' || Array.isArray(value)) return false;
   const allowed = new Set(['kind', 'harness', 'harnessVersion', 'model', 'instanceHash', 'attestation']);
   for (const key of Object.keys(value)) if (!allowed.has(key)) return false;
-  if (!AGENT_KINDS.has(value.kind)) return false;
-  if (value.attestation !== 'self-declared') return false;
+  const descriptor = value as Record<string, unknown>;
+  if (typeof descriptor.kind !== 'string' || !AGENT_KINDS.has(descriptor.kind)) return false;
+  if (descriptor.attestation !== 'self-declared') return false;
   for (const key of ['harness', 'harnessVersion', 'model']) {
-    const item = value[key];
+    const item = descriptor[key];
     if (item === null || item === undefined) continue;
     if (typeof item !== 'string' || item.length > 64 || !SAFE_TOKEN.test(item)) return false;
   }
-  if (value.instanceHash !== null && value.instanceHash !== undefined &&
-      !HASH.test(value.instanceHash)) {
+  if (descriptor.instanceHash !== null && descriptor.instanceHash !== undefined &&
+      (typeof descriptor.instanceHash !== 'string' || !HASH.test(descriptor.instanceHash))) {
     return false;
   }
   return true;
@@ -117,7 +135,7 @@ export function isStoredAgentDescriptor(value) {
  * Everything here is a guess about the local runtime, which is another reason the result
  * is only ever descriptive.
  */
-export function agentDescriptorFromEnvironment(env = process.env) {
+export function agentDescriptorFromEnvironment(env: NodeJS.ProcessEnv = process.env): AgentDescriptor | null {
   const claude = Boolean(env.CLAUDECODE || env.CLAUDE_CODE_ENTRYPOINT);
   const codex = Boolean(env.CODEX_HOME || env.CODEX_SANDBOX || env.CODEX_THREAD_ID);
 

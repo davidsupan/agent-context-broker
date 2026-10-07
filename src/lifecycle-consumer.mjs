@@ -19,7 +19,7 @@ import {
   observedAtFor,
   persistLifecycleOutbox,
   sourceAttestation
-} from './lifecycle-events.mjs';
+} from './lifecycle-events.mts';
 import { realpathSync as resolvePhysicalPath } from 'node:fs';
 
 import { verifyEventTail } from './event-store.mjs';
@@ -28,7 +28,7 @@ import { loadProviderPolicy, policyEntry, scopeReadable } from './provider-polic
 import {
   planSourceAttestation,
   provenanceForSourceToken
-} from './source-attestation.mjs';
+} from './source-attestation.mts';
 
 const SAFE_REFERENCE = /^(?:https|context|confluence|jira|repo):\/\/[^\s]{1,500}$/u;
 const DEFAULT_STATE_LIMIT = 256;
@@ -419,8 +419,12 @@ function persistInjection(options, eventName, advisory) {
 }
 
 async function importAdapter(root, moduleName) {
-  const path = join(root, 'src', moduleName);
-  if (!existsSync(path)) throw new Error('Agent Context Broker adapter is unavailable.');
+  // Adapters are named by their installed .mjs file. A source checkout may hold the TypeScript source instead
+  // (the package build strips it to that .mjs), so only there the .mts twin stands in.
+  const installed = join(root, 'src', moduleName);
+  const source = moduleName.endsWith('.mjs') ? `${installed.slice(0, -'.mjs'.length)}.mts` : null;
+  const path = existsSync(installed) ? installed : source && existsSync(source) ? source : null;
+  if (!path) throw new Error('Agent Context Broker adapter is unavailable.');
   return import(pathToFileURL(path).href);
 }
 

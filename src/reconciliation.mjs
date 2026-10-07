@@ -13,7 +13,7 @@ import {
 } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 
-import { isSourceAttested } from './source-attestation.mjs';
+import { isSourceAttested } from './source-attestation.mts';
 import { appendBrokerEvent } from './event-store.mjs';
 import { unsafeContentReason } from './content-safety.mjs';
 

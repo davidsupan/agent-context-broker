@@ -19,7 +19,7 @@ import {
   readRestricted,
   scopeReadable
 } from '../src/provider-policy.mjs';
-import { attestSource, planSourceAttestation } from '../src/source-attestation.mjs';
+import { attestSource, planSourceAttestation } from '../src/source-attestation.mts';
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const roots = [];

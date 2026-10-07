@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-import { loadContextProfiles, routeContextProfile } from '../src/context-router.mjs';
+import { loadContextProfiles, routeContextProfile } from '../src/context-router.mts';
 
 describe('context profile router', () => {
   test('loads the bounded profile catalog and honors an explicit profile', () => {
