@@ -403,7 +403,9 @@ describe('installation manager', () => {
     const root = testRoot('runtime-path');
     const input = options(root);
     // A stable entry such as a Homebrew or nvm symlink must survive as written, not as its versioned real path.
-    const link = join(root, `pinned-node${extname(process.execPath)}`);
+    // The link keeps the executable's own name: Bun behaves as Node when called through a name ending in "node".
+    mkdirSync(join(root, 'stable-bin'), { recursive: true });
+    const link = join(root, 'stable-bin', basename(process.execPath));
     try {
       symlinkSync(process.execPath, link, 'file');
     } catch (error) {
