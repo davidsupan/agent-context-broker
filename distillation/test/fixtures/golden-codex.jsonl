@@ -1,0 +1,12 @@
+{"timestamp":"2026-09-30T08:00:00.000Z","type":"session_meta","payload":{"id":"00000000-0000-4000-8000-000000000001","cwd":"C:\\w\\fixture","originator":"codex_cli_rs","cli_version":"0.99.0"}}
+{"timestamp":"2026-09-30T08:00:01.000Z","type":"turn_context","payload":{"cwd":"C:\\w\\fixture","approval_policy":"on-request","model":"fixture-model"}}
+{"timestamp":"2026-09-30T08:00:02.000Z","type":"response_item","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":"Developer preamble is never dialogue."}]}}
+{"timestamp":"2026-09-30T08:00:03.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Odloči: zadrži dnevnike 14 dni, ne 7. Use password=hunter22 only in the fixture."},{"type":"input_image","image_url":"data:image/png;base64,AAAA"}]}}
+{"timestamp":"2026-09-30T08:00:04.000Z","type":"event_msg","payload":{"type":"user_message","message":"Odloči: zadrži dnevnike 14 dni, ne 7. 🚀 Second wording with emoji.","images":[]}}
+{"timestamp":"2026-09-30T08:00:05.000Z","type":"response_item","payload":{"type":"reasoning","summary":[{"type":"summary_text","text":"hidden reasoning"}],"encrypted_content":"opaque"}}
+{"timestamp":"2026-09-30T08:00:06.000Z","type":"response_item","payload":{"type":"function_call","name":"shell","arguments":"{\"command\":[\"git\",\"status\"]}","call_id":"call_1"}}
+{"timestamp":"2026-09-30T08:00:07.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call_1","output":"{\"output\":\"clean\"}"}}
+{"timestamp":"2026-09-30T08:00:08.000Z","type":"response_item","payload":{"type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"Recorded the retention decision: 14 days replaces 7 days. The earlier figure was a mistake that came from an outdated runbook; the corrected policy keeps one worker and retains evidence privately for review before anything is published anywhere else."}]}}
+{"timestamp":"2026-09-30T08:00:09.000Z","type":"event_msg","payload":{"type":"agent_message","message":"Short commentary.","phase":"commentary"}}
+{"timestamp":"2026-09-30T08:00:10.000Z","type":"event_msg","payload":{"type":"token_count","info":null}}
+{"timestamp":"2026-09-30T08:00:11.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"item_1","content":[{"type":"Text","text":"Item-completed agent text with Bearer abcdefghijklmnopqrstuvwxyz0123 inside."}]}}}
