@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import * as claudeCode from './claude-inventory.mjs';
 import * as codex from './codex-inventory-v2.mjs';
 import { planContextQuery, runContextQuery } from './context-query.mjs';
+import { runClaimsCommand } from './claims-export-cli.mts';
 import { describeProviderPolicy, loadProviderPolicy } from './provider-policy.mjs';
 import { planContextPublication, publishContext } from './context-publish.mjs';
 import {
@@ -290,7 +291,9 @@ function parseArgs(argv) {
   return options;
 }
 
-try {
+if (['capabilities', 'claims-export'].includes(process.argv[2])) {
+  process.exitCode = runClaimsCommand(process.argv[2], process.argv.slice(3));
+} else try {
   const options = parseArgs(process.argv.slice(2));
   const command = options.command;
   delete options.command;
