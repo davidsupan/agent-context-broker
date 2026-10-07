@@ -10,10 +10,19 @@ import { BrokerConfig, publishPending, type BrokerTransport } from './publicatio
 import { recover } from './recovery.mts';
 import { probeOwner, probeNamedJob } from './windows-job.mts';
 import { canonical, digest } from './slicing.mts';
-import { ProviderConfigSchema } from './provider.mts';
+import { createProviderRunner, ProviderConfigSchema } from './provider.mts';
 import { prepareDocumentSlices, type DocumentGuard } from './documents.mts';
+import { resolveClaudeCli, type CliEnvironment } from './claude-cli.mts';
+import { DailySeconds } from './schemas.mts';
+import { checkDailyBudget } from './pilot-budget.mts';
 
 export const DailyConfig = z.strictObject({
+  enabled: z.boolean().optional(),
+  claudeCli: z.string().min(1).optional(),
+  dailySeconds: DailySeconds.optional(),
+  onboarding: z.strictObject({ version: z.literal(1), planDigest: z.string().regex(/^[a-f0-9]{64}$/),
+    enabledAt: z.iso.datetime(), deviceId: z.uuid(), scheduleTime: z.string().default('09:15'),
+    sources: z.array(z.enum(['code', 'cowork-import'])), disabledAt: z.iso.datetime().optional() }).optional(),
   capture: CaptureConfig,
   semantic: WorkerPolicy,
   broker: BrokerConfig.optional(),
@@ -28,7 +37,8 @@ export const DailyConfig = z.strictObject({
   }
 });
 
-type DailyOptions = { synthetic?: boolean; now?: number; rereadConfig?: () => unknown; brokerTransport?: BrokerTransport };
+type DailyOptions = { synthetic?: boolean; now?: number; rereadConfig?: () => unknown; brokerTransport?: BrokerTransport;
+  cliEnvironment?: CliEnvironment; claudeCli?: string };
 type Daily = z.infer<typeof DailyConfig>;
 
 /** Adapter auth homes and pinned receipts that no document root may overlap. */
@@ -51,12 +61,14 @@ async function executeDaily(config: z.infer<typeof DailyConfig>, input: unknown,
   const documents = enabledDocuments(config), documentIds = documents.map(source => source.id);
   for (let index = 0; index < config.maxCaptureTicks; index++) {
     const result = runCapture(config.capture, home, true, documentGuard(config)); capture.push(result);
+    if ('errors' in result && result.errors && result.errors > 0) throw new Error('capture-integrity-failure');
     if (result.state === 'busy' || result.state === 'complete-tick') break;
   }
   const prepared = [];
   for (let index = 0; index < config.maxPreparationJobs; index++) {
     const result = prepareSlices(home, config.semantic.excludedSources, config.semantic.sliceChars, true);
     prepared.push(result);
+    if (result.state === 'blocked') throw new Error('slice-preparation-integrity');
     if (result.state !== 'prepared') break;
   }
   const preparedDocuments = [];
@@ -104,16 +116,25 @@ async function executeDaily(config: z.infer<typeof DailyConfig>, input: unknown,
 
 export async function runDaily(input: unknown, home: string, execute = false, runner?: ModelRunner, options: DailyOptions = {}) {
   const config = DailyConfig.parse(input);
+  if (config.enabled === false) return { state: 'disabled', writes: false, modelCalls: 0 };
+  checkDailyBudget(home, config.dailySeconds);
+  const resolvedCli = config.adapters?.providers.claude || config.onboarding || config.claudeCli || options.claudeCli
+    ? await resolveClaudeCli(options.claudeCli ?? config.claudeCli, options.cliEnvironment ?? { platform: process.platform, env: process.env }) : null;
+  if (resolvedCli && config.adapters?.providers.claude) {
+    if (resolvedCli.sha256 !== config.adapters.providers.claude.executableSha256) throw new Error('provider-executable-changed');
+    config.adapters.providers.claude.executable = resolvedCli.path;
+  }
   const capturePlan = runCapture(config.capture, home, false, documentGuard(config));
-  if (!execute) return { state: 'plan', writes: false, modelCalls: 0, fullyCurrent: false, capture: capturePlan };
+  if (!execute) return { state: 'plan', writes: false, modelCalls: 0, fullyCurrent: false, capture: capturePlan, resolvedCli };
+  if (!runner && config.adapters) runner = await createProviderRunner(config.adapters, home);
   const id = randomUUID();
   const directory = join(home, 'daily-runs');
   noLinks(directory); mkdirSync(directory, { recursive: true });
   record(join(directory, `${id}.started.json`), { schemaVersion: 1, runId: id,
-    recordedAt: new Date().toISOString(), configSha256: digest(config), mode: options.synthetic ? 'synthetic' : 'production-candidate' });
+    recordedAt: new Date().toISOString(), configSha256: digest(config), resolvedCli, mode: options.synthetic ? 'synthetic' : 'production-candidate' });
   try {
     const result = await executeDaily(config, input, home, runner, options);
-    record(join(directory, `${id}.finished.json`), { schemaVersion: 1, runId: id, recordedAt: new Date().toISOString(), result });
+    record(join(directory, `${id}.finished.json`), { schemaVersion: 1, runId: id, recordedAt: new Date().toISOString(), resolvedCli, result });
     return result;
   } catch (error) {
     record(join(directory, `${id}.failed.json`), { schemaVersion: 1, runId: id, recordedAt: new Date().toISOString(), code: 'daily-run-failed', fullyCurrent: false });

@@ -1,0 +1,19 @@
+param([ValidateSet('install','remove','status')][string]$Action)
+$ErrorActionPreference = 'Stop'
+$name = 'AgentContextBroker-Distill'
+$existing = Get-ScheduledTask -TaskPath '/' | Where-Object { $_.TaskName -eq $name }
+if ($Action -eq 'remove') {
+  if ($existing) { Unregister-ScheduledTask -TaskPath '/' -TaskName $name -Confirm:$false }
+} elseif ($Action -eq 'status') {
+  if (!$existing) { @{ installed = $false; nextRun = $null; lastResult = $null } | ConvertTo-Json -Compress }
+  else {
+    $info = Get-ScheduledTaskInfo -TaskPath '/' -TaskName $name
+    @{ installed = $true; nextRun = $info.NextRunTime.ToString('o'); lastResult = $info.LastTaskResult } | ConvertTo-Json -Compress
+  }
+} else {
+  $taskAction = New-ScheduledTaskAction -Execute '<ROOT>/node & runtime' -Argument '"<ROOT>/entry space/cli.mts" "scheduled" "--mode" "run" "--home" "<ROOT>/runtime space" "--config" "<ROOT>/runtime space/daily.json"'
+  $trigger = New-ScheduledTaskTrigger -Daily -At '09:15'
+  $principal = New-ScheduledTaskPrincipal -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Limited
+  $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 45)
+  Register-ScheduledTask -TaskPath '/' -TaskName $name -Action $taskAction -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
+}

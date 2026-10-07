@@ -11,7 +11,7 @@ import { SliceSchema } from './output.mts';
 
 const Job = z.object({ id: HashSchema, source_key: HashSchema, start_byte: z.number().int().nonnegative(),
   end_byte: z.number().int().nonnegative(), generation: z.string(), receipt_hash: HashSchema,
-  provider: z.enum(['codex', 'claude-code']), relative_path: z.string(), state: z.literal('pending') });
+  provider: z.enum(['codex', 'claude-code', 'cowork-import']), relative_path: z.string(), state: z.literal('pending') });
 export type PendingJob = z.infer<typeof Job>;
 
 function* lines(path: string, maxBytes: number, maxLine: number) {
@@ -57,7 +57,7 @@ export function checkedDialogue(home: string, value: unknown) {
   try {
     for (const line of lines(join(directory, 'raw.private.jsonl'), 8 * 1024 ** 2, 4 * 1024 ** 2)) {
       rawHash.update(line);
-      const event = parseEvent(line, job.provider);
+      const event = parseEvent(line, job.provider === 'cowork-import' ? 'claude-code' : job.provider);
       for (const text of event.texts) {
         const next = body.next();
         if (next.done) throw new Error('dialogue-provenance');

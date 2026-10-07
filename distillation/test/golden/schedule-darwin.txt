@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.agent-context-broker.distill</string>
+  <key>ProgramArguments</key><array><string><ROOT>/node &amp; runtime</string><string><ROOT>/entry space/cli.mts</string><string>scheduled</string><string>--mode</string><string>run</string><string>--home</string><string><ROOT>/runtime space</string><string>--config</string><string><ROOT>/runtime space/daily.json</string></array>
+  <key>StartCalendarInterval</key><dict><key>Hour</key><integer>9</integer><key>Minute</key><integer>15</integer></dict>
+  <key>RunAtLoad</key><false/>
+  <key>StandardOutPath</key><string><ROOT>/runtime space/logs/scheduled.out.log</string>
+  <key>StandardErrorPath</key><string><ROOT>/runtime space/logs/scheduled.err.log</string>
+</dict></plist>

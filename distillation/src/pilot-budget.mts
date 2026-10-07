@@ -1,12 +1,28 @@
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
-import { openStore, setup } from './store.mts';
+import { dailyBudgetLimit, openStore, setup } from './store.mts';
+import { BudgetRowSchema, DailySeconds } from './schemas.mts';
 import { ownProcessIdentity, probeNamedJob } from './windows-job.mts';
 import { digest, canonical } from './slicing.mts';
 import type { LiveProbeCoordinator } from './capability-probe.mts';
 
 const Approval = z.string().regex(/^[A-Za-z0-9_.:-]{1,120}$/);
+
+export function configureDailyBudget(home: string, seconds: number) {
+  DailySeconds.parse(seconds);
+  using db = openStore(join(home, 'queue.sqlite3'), { readonly: false, create: true }); setup(db);
+  db.transaction(() => {
+    if (db.query("SELECT 1 FROM semantic_attempts WHERE state='running' LIMIT 1").get()) throw new Error('pilot-worker-busy');
+    db.query("INSERT INTO semantic_settings(key,value) VALUES('daily-limit-seconds',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(String(seconds));
+  }).immediate();
+}
+
+export function checkDailyBudget(home: string, seconds?: number) {
+  if (seconds === undefined) return;
+  using db = openStore(join(home, 'queue.sqlite3'));
+  if (dailyBudgetLimit(db) !== DailySeconds.parse(seconds)) throw new Error('pilot-budget-integrity');
+}
 const Request = z.strictObject({ approvalId: Approval, provider: z.enum(['claude', 'codex']),
   seconds: z.literal(60), globalBudgetSeconds: z.literal(1800) });
 const Proof = z.strictObject({ completionProof: z.enum(['process-tree-empty-v1', 'windows-atomic-job-empty-v1', 'windows-job-empty-v1']),
@@ -32,8 +48,8 @@ export function liveProbeCoordinator(home: string, approvedId: string,
       if (db.query("SELECT 1 FROM semantic_attempts WHERE state='running' LIMIT 1").get()) throw new Error('pilot-worker-busy');
       if (db.query('SELECT 1 FROM semantic_pilot_approvals WHERE approval_id=? AND provider=?').get(approvedId, request.provider)) throw new Error('pilot-already-reserved');
       const row = db.query('SELECT seconds FROM semantic_budget WHERE day=?').get(day);
-      const used = row ? z.object({ seconds: z.number().int().min(0).max(1800) }).parse(row).seconds : 0;
-      if (used + 60 > 1800) throw new Error('pilot-budget-exhausted');
+      const used = row ? BudgetRowSchema.parse(row).seconds : 0;
+      if (used + 60 > Math.min(request.globalBudgetSeconds, dailyBudgetLimit(db))) throw new Error('pilot-budget-exhausted');
       db.query(`INSERT INTO semantic_attempts(job_id,token,state,day,reserved_seconds,started_at,
         provider,reason,slice_id,owner_json,execution_phase,containment_json)
         VALUES(?,?,'running',?,60,?,?,'user-approved-synthetic-pilot',?,?,'dispatch-intent',?)`).run(

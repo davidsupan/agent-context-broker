@@ -16,7 +16,7 @@ import { CODEX_STARTUP_NOTICE_POLICY, permitsCodexStartupNotice, type CodexParse
 
 const MiB = 1024 * 1024;
 const Hash = z.string().regex(/^[a-f0-9]{64}$/);
-const Path = z.string().min(1).max(4096).refine(value => /^[a-z]:[\\/]/i.test(value) && isAbsolute(value) && !value.includes('\0'));
+const Path = z.string().min(1).max(4096).refine(value => isAbsolute(value) && !value.includes('\0'));
 const ReceiptRef = z.strictObject({ path: Path, sha256: Hash });
 const Model = z.string().regex(/^[A-Za-z0-9._-]{1,80}$/);
 const Provider = z.enum(['claude', 'codex']);

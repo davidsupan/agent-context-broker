@@ -13,11 +13,13 @@ const identity = { platform: 'windows' as const, pid: 4242, creationFiletime: '1
 function fixture(change: (config: Record<string, any>) => void = () => {}) {
   const root = mkdtempSync(join(tmpdir(), 'acb-scheduled-')); roots.push(root);
   const home = join(root, 'home'); mkdirSync(home);
+  const executable = join(root, 'claude.exe'); writeFileSync(executable, 'synthetic executable bytes');
   const registry = JSON.stringify({ schemaVersion: 1, entries: [] });
   const config: Record<string, any> = {
+    claudeCli: executable,
     capture: { providerRoots: { codex: join(root, 'source') }, historyRegistry: { path: join(root, 'h.json'), sha256: sha256(registry) } },
     semantic: { claudeAvailable: true, codexAvailable: false, attemptSeconds: 300 },
-    adapters: { providers: { claude: { executable: 'C:/synthetic/claude.exe', executableSha256: 'b'.repeat(64), version: '2.1.263',
+    adapters: { providers: { claude: { executable, executableSha256: sha256('synthetic executable bytes'), version: '2.1.263',
       model: 'haiku', authHome: 'C:/synthetic/auth', capabilityReceipt: { path: 'C:/synthetic/cap.json', sha256: 'c'.repeat(64) },
       liveProfileReceipt: { path: 'C:/synthetic/live.json', sha256: 'd'.repeat(64) } } } },
     maxModelCalls: 6,
@@ -74,7 +76,7 @@ test('a day that already has a daily run is skipped, whoever started it', async 
   const f = fixture();
   mkdirSync(join(f.home, 'daily-runs'));
   writeFileSync(join(f.home, 'daily-runs', 'x.started.json'), JSON.stringify({ recordedAt: '2026-10-06T06:59:00.000Z' }));
-  expect(await runScheduled(input(f), f.deps)).toMatchObject({ state: 'skipped', reason: 'already-ran-today', exitCode: 0 });
+  expect(await runScheduled(input(f), f.deps)).toMatchObject({ state: 'skipped', reason: 'already-ran-today', exitCode: 2 });
   writeFileSync(join(f.home, 'daily-runs', 'y.started.json'), 'not json');
   expect(f.counts().dailyCalls).toBe(0);
 });

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 export const DAILY_SECONDS = 1800;
+export const DailySeconds = z.number().int().min(60).max(7200);
 export const HashSchema = z.string().regex(/^[a-f0-9]{64}$/);
 export const TokenSchema = z.string().regex(/^[a-f0-9]{32}$/);
 export const UnixSecondsSchema = z.number().finite().nonnegative().max(8.64e12);
@@ -37,7 +38,7 @@ export const ReservationResultSchema = z.discriminatedUnion('state', [
   })
 ]);
 export type ReservationResult = z.infer<typeof ReservationResultSchema>;
-export const BudgetRowSchema = z.object({ seconds: z.number().int().min(0).max(DAILY_SECONDS) });
+export const BudgetRowSchema = z.object({ seconds: z.number().int().min(0).max(7200) });
 export const SliceRowSchema = z.object({ payload_sha: HashSchema, receipt_hash: HashSchema });
 export const ColumnRowsSchema = z.array(z.object({ name: z.string() }));
 export const CountRowsSchema = z.array(z.object({ state: z.string(), n: z.number().int().nonnegative() }));
@@ -45,8 +46,8 @@ export const StatusSchema = z.strictObject({
   schemaVersion: z.literal(1),
   runtime: z.literal('bun'),
   utcDay: z.iso.date(),
-  dailyLimitSeconds: z.literal(DAILY_SECONDS),
-  reservedSeconds: z.number().int().min(0).max(DAILY_SECONDS),
+  dailyLimitSeconds: DailySeconds,
+  reservedSeconds: z.number().int().min(0).max(7200),
   fullyCurrent: z.literal(false),
   productionEnabled: z.literal(false),
   boundary: z.string(),

@@ -3,10 +3,17 @@ import { lstatSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { BudgetRowSchema, ColumnRowsSchema, CountRowsSchema, DAILY_SECONDS,
-  OpenOptionsSchema, ReservationSchema, SliceRowSchema, StatusSchema, TokenSchema, UnixSecondsSchema } from './schemas.mts';
+  DailySeconds, OpenOptionsSchema, ReservationSchema, SliceRowSchema, StatusSchema, TokenSchema, UnixSecondsSchema } from './schemas.mts';
 import type { ReservationInput, ReservationResult, StoreStatus } from './schemas.mts';
 
 export { DAILY_SECONDS } from './schemas.mts';
+
+/** Both pilot probes and corpus attempts read this same setting and ledger. */
+export function dailyBudgetLimit(db: Database): number {
+  if (!db.query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='semantic_settings'").get()) return DAILY_SECONDS;
+  const row = db.query("SELECT value FROM semantic_settings WHERE key='daily-limit-seconds'").get() as { value: string } | null;
+  return row ? DailySeconds.parse(Number(row.value)) : DAILY_SECONDS;
+}
 
 export function noLinks(path: string) {
   let part = resolve(path);
@@ -90,7 +97,7 @@ export function reserve(db: Database, input: ReservationInput): ReservationResul
     const reason = quota ? 'claude-quota-unavailable' : 'primary';
     const budget = db.query('SELECT seconds FROM semantic_budget WHERE day=?').get(day);
     const used = budget === null ? 0 : BudgetRowSchema.parse(budget).seconds;
-    if (used + seconds > DAILY_SECONDS) return { state: 'paused-budget', invoked: false };
+    if (used + seconds > dailyBudgetLimit(db)) return { state: 'paused-budget', invoked: false };
     if (lane === 'document') {
       // The lane cap is checked under the same lock as the global budget, never before it.
       if (!hasLane(db)) db.run('ALTER TABLE semantic_attempts ADD COLUMN lane TEXT');
@@ -138,7 +145,7 @@ export function markDispatch(db: Database, token: string) {
 export function status(db: Database, now = Date.now() / 1000): StoreStatus {
   const { day } = moment(now);
   const tables = new Set(ColumnRowsSchema.parse(db.query("SELECT name FROM sqlite_master WHERE type='table'").all()).map(r => r.name));
-  const result: StoreStatus = { schemaVersion: 1, runtime: 'bun', utcDay: day, dailyLimitSeconds: DAILY_SECONDS,
+  const result: StoreStatus = { schemaVersion: 1, runtime: 'bun', utcDay: day, dailyLimitSeconds: dailyBudgetLimit(db),
     reservedSeconds: 0, fullyCurrent: false, productionEnabled: false,
     acceptedState: 'not-observed',
     boundary: 'Queue metadata only; not live-source, model or broker verification' };

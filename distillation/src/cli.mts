@@ -1,20 +1,42 @@
 import { parseArgs } from 'node:util';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { execFile } from 'node:child_process';
 import { z } from 'zod';
-import { openStore, status } from './store.mts';
 import { CaptureConfig, runCapture } from './capture.mts';
 import { documentsReport } from './documents.mts';
 import { DailyConfig, runDaily } from './daily.mts';
-import { createProviderRunner, currentPinnableEnvironment, preflight } from './provider.mts';
+import { currentPinnableEnvironment, preflight } from './provider.mts';
 import { noLinks } from './store.mts';
 import { applyAutomatic, decide, decideBatch, listForReview, reviewHistory, reviewStats } from './review.mts';
-import { runScheduled } from './scheduled.mts';
+import { runScheduled, scheduledExitCode } from './scheduled.mts';
 import { describeLiveProbe, runLiveProbe, type LiveProbeOptions } from './capability-probe.mts';
 import { liveProbeCoordinator } from './pilot-budget.mts';
 import { addClaim, claimProposal, listClaims, markPublished, parseClaimsInput, revokeClaim } from './operator-claims.mts';
 import { planCoworkCapture, type CoworkPlan } from './cowork-capture.mts';
 import { stdinText } from './platform.mts';
+import { enable, disable, onboardingStatus, reviewCount, type OnboardingContext } from './onboarding.mts';
+
+/** OS boundary: core onboarding never reads ambient environment or starts commands. */
+function onboardingContext(configDir?: string, coworkExport?: string): OnboardingContext {
+  const env = { ...process.env };
+  const platform = process.platform;
+  if (platform !== 'darwin' && platform !== 'win32') throw new Error('onboarding-platform-unsupported');
+  const userHome = platform === 'win32' ? env.USERPROFILE : env.HOME;
+  if (!userHome) throw new Error('onboarding-home-unavailable');
+  return { platform, env, claudeConfigDir: configDir ?? env.CLAUDE_CONFIG_DIR ?? join(userHome, '.claude'),
+    coworkExportPath: coworkExport ?? join(configDir ?? env.CLAUDE_CONFIG_DIR ?? join(userHome, '.claude'), 'cowork-history.json'),
+    schedule: { platform, nodePath: process.execPath, cliPath: fileURLToPath(import.meta.url),
+      ...(platform === 'darwin' ? { launchAgentsDir: join(userHome, 'Library', 'LaunchAgents'), uid: process.getuid?.() }
+        : { powershellPath: join(env.SYSTEMROOT ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe') }) },
+    runner: (executable, args) => new Promise((resolve, reject) => {
+      execFile(executable, args, { windowsHide: true, timeout: 30000, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
+        if (error && typeof error.code !== 'number') { reject(new Error('onboarding-schedule-runner-failed')); return; }
+        resolve({ exitCode: error?.code as number ?? 0, stdout, stderr });
+      });
+    }) };
+}
 
 function readJson(path: string): unknown {
   noLinks(path);
@@ -49,6 +71,7 @@ function coworkSummary(plan: CoworkPlan) {
     sliceChars: plan.plan.slices.map(s => s.segments.reduce((n, x) => n + x.endChar - x.startChar, 0)) };
 }
 
+let scheduledCommand = false;
 try {
   const { values, positionals } = parseArgs({ options: { home: { type: 'string' },
     config: { type: 'string' }, execute: { type: 'boolean', default: false },
@@ -58,9 +81,14 @@ try {
     decision: { type: 'string' }, reason: { type: 'string' }, 'expected-latest': { type: 'string' },
     all: { type: 'boolean', default: false }, limit: { type: 'string' },
     id: { type: 'string' }, 'source-token': { type: 'string' }, 'claims-root': { type: 'string' },
-    file: { type: 'string' }, 'slice-chars': { type: 'string' } },
+    file: { type: 'string' }, 'slice-chars': { type: 'string' },
+    'daily-seconds': { type: 'string' }, 'claude-cli': { type: 'string' }, sources: { type: 'string' },
+    'plan-digest': { type: 'string' }, consent: { type: 'string' }, once: { type: 'boolean' },
+    'schedule-time': { type: 'string' }, 'claude-config-dir': { type: 'string' },
+    'cowork-export': { type: 'string' }, 'provider-config': { type: 'string' } },
     allowPositionals: true });
   const command = positionals[0];
+  scheduledCommand = command === 'run' || command === 'scheduled';
   // --claims-root reads an external claims folder (read-only); receipts stay under --home.
   const claimsAt = (home: string) => values['claims-root'] ? { home, claimsRoot: values['claims-root'] } : home;
   if (command === 'print-environment') {
@@ -68,8 +96,21 @@ try {
   } else if (!values.home) {
     throw new Error('command-and-home-required');
   } else if (command === 'status' && positionals.length === 1) {
-    using db = openStore(join(values.home, 'queue.sqlite3'));
-    console.log(JSON.stringify(status(db)));
+    console.log(JSON.stringify(await onboardingStatus(values.home, onboardingContext(values['claude-config-dir'], values['cowork-export']))));
+  } else if (command === 'enable' && positionals.length === 1) {
+    console.log(JSON.stringify(await enable({ home: values.home, execute: values.execute,
+      ...(values['daily-seconds'] !== undefined ? { dailySeconds: Number(values['daily-seconds']) } : {}),
+      ...(values['claude-cli'] ? { claudeCli: values['claude-cli'] } : {}),
+      ...(values.sources !== undefined ? { sources: values.sources.split(',') } : {}),
+      ...(values['plan-digest'] ? { planDigest: values['plan-digest'] } : {}),
+      ...(values.consent ? { consent: values.consent } : {}),
+      ...(values['schedule-time'] ? { time: values['schedule-time'] } : {}),
+      ...(values['provider-config'] ? { providerConfigPath: values['provider-config'] } : {}) },
+    onboardingContext(values['claude-config-dir'], values['cowork-export']))));
+  } else if (command === 'disable' && positionals.length === 1) {
+    console.log(JSON.stringify(await disable(values.home, values.execute, onboardingContext(values['claude-config-dir'], values['cowork-export']))));
+  } else if (command === 'review' && positionals[1] === 'count') {
+    console.log(reviewCount(values.home));
   } else if (command === 'review' && positionals[1] === 'list') {
     console.log(JSON.stringify(listForReview(values.home, { includeDecided: values.all })));
   } else if (command === 'review' && positionals[1] === 'decide-batch') {
@@ -98,9 +139,10 @@ try {
     console.log(JSON.stringify(claimProposal(claimsAt(values.home), values.id, values['source-token'])));
   } else if (command === 'claims' && positionals[1] === 'mark-published' && positionals.length === 2 && values.id) {
     console.log(JSON.stringify(markPublished(claimsAt(values.home), values.id, parseClaimsInput(await stdinText()))));
-  } else if (command === 'scheduled' && values.config) {
-    const mode = z.enum(['preflight-only', 'run']).parse(values.mode);
-    const result = await runScheduled({ home: values.home, configPath: values.config, mode,
+  } else if ((command === 'scheduled' && values.config) || (command === 'run' && values.once)) {
+    const mode = command === 'run' ? 'run' : z.enum(['preflight-only', 'run']).parse(values.mode);
+    const result = await runScheduled({ home: values.home, configPath: values.config ?? join(values.home, 'daily.json'), mode,
+      ...(values['claude-cli'] ? { claudeCli: values['claude-cli'] } : {}),
       ...(values['codex-automation'] ? { codexAutomationPath: values['codex-automation'] } : {}) });
     console.log(JSON.stringify(result));
     process.exitCode = result.exitCode;
@@ -161,15 +203,15 @@ try {
       console.log(JSON.stringify(runCapture(config, values.home, values.execute)));
     } else {
       const daily = DailyConfig.parse(config);
-      const runner = values.execute && daily.adapters ? await createProviderRunner(daily.adapters, values.home) : undefined;
-      console.log(JSON.stringify(await runDaily(daily, values.home, values.execute, runner, {
+      console.log(JSON.stringify(await runDaily(daily, values.home, values.execute, undefined, {
+        ...(values['claude-cli'] ? { claudeCli: values['claude-cli'] } : {}),
         rereadConfig: () => readJson(values.config!)
       })));
     }
   } else { throw new Error('unknown-command'); }
 } catch (error) {
-  const code = error instanceof Error && /^(?:provider|artifact|capture|registry|slice|live-profile|source|native-file|command|config|adapter|broker|review|probe|pilot|scheduler|claims|document)-[a-z0-9-]{1,70}$/.test(error.message)
+  const code = error instanceof Error && /^(?:linked|onboarding|provider|artifact|capture|registry|slice|live-profile|source|native-file|command|config|adapter|broker|review|probe|pilot|scheduler|claims|document)-[a-z0-9-]{1,70}$/.test(error.message)
     ? error.message : 'command-failed';
   console.log(JSON.stringify({ state: 'unavailable', code, fullyCurrent: false }));
-  process.exitCode = 1;
+  process.exitCode = scheduledCommand ? scheduledExitCode(code) : 1;
 }

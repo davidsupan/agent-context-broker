@@ -12,7 +12,7 @@ import { parseEvent } from './transcript.mts';
 import { windowsFileIdentity } from './windows-file-identity.mts';
 
 const MiB = 1024 * 1024;
-const Provider = z.enum(['codex', 'claude-code']);
+const Provider = z.enum(['codex', 'claude-code', 'cowork-import']);
 const Bound = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 export const CaptureConfig = z.strictObject({
   providerRoots: z.partialRecord(Provider, z.string().min(1)),
@@ -183,11 +183,13 @@ export function runCapture(input: unknown, runtimeHome: string, execute = false,
   noLinks(home);
   const roots = Object.entries(config.providerRoots).map(([provider, path]) => [Provider.parse(provider), resolve(path!)] as const);
   if (!roots.length) throw new Error('missing-provider-roots');
-  for (const [, root] of roots) {
+  for (const [provider, root] of roots) {
     let directory: boolean;
     try { noLinks(root); directory = lstatSync(root).isDirectory(); }
     catch { throw new Error('provider-root-invalid-or-unreadable'); }
-    if (!directory || within(root, home) || within(home, root)) throw new Error('invalid-root-boundary');
+    // Only the dedicated immutable import directory is permitted inside runtime storage.
+    const imported = provider === 'cowork-import' && root === join(home, 'cowork-import');
+    if (!directory || within(root, home) || (within(home, root) && !imported)) throw new Error('invalid-root-boundary');
     if (roots.some(([, other]) => other !== root && (within(root, other) || within(other, root)))) throw new Error('overlapping-roots');
   }
   if (new Set(roots.map(([, r]) => r.toLowerCase())).size !== roots.length) throw new Error('overlapping-roots');
@@ -378,7 +380,7 @@ export function runCapture(input: unknown, runtimeHome: string, execute = false,
                   const next = raw.indexOf(10, offset) + 1;
                   const line = raw.subarray(offset, next);
                   if (line.length > 4 * MiB) throw new Error('oversized-event');
-                  const parsed = parseEvent(line, provider);
+                  const parsed = parseEvent(line, provider === 'cowork-import' ? 'claude-code' : provider);
                   deadlineCheck(deadline);
                   const eventSha256 = sha256(line);
                   for (const text of parsed.texts) {
