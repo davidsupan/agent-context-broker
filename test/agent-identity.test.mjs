@@ -51,7 +51,7 @@ function proposal(sourceToken, issueKey, summary, overrides = {}) {
     summary,
     nextSteps: ['run the focused validation'],
     limitations: [],
-    changedSurfaces: ['Orca API contract'],
+    changedSurfaces: ['API contract'],
     canonicalRefs: [],
     relatedScopes: [],
     observedAt: '2026-08-26T08:05:00.000Z',
