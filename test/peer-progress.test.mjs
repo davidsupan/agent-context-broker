@@ -572,7 +572,7 @@ describe('peer progress', () => {
       runtimeRoot, eventRuntimeRoot, ticketPackagesRoot: packagesRoot,
       provider: 'codex', execute: true,
       proposal: proposal(feToken, 'APP-22003', 'FE found that omitted and null values require different rendering', {
-        changedSurfaces: ['Operator Portal location details']
+        changedSurfaces: ['portal location details']
       })
     });
     for (const issueKey of ['APP-22001', 'APP-22002']) {
