@@ -6,7 +6,7 @@ import {
   mkdirSync,
   readFileSync,
   rmSync,
-  writeFileSync, realpathSync } from 'node:fs';
+  writeFileSync, realpathSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, extname, dirname, join, resolve  } from 'node:path';
 import { afterEach, describe, test } from 'node:test';
@@ -397,5 +397,41 @@ describe('installation manager', () => {
       command,
       "'/Users/example/O'\\''Brien Tools/bun' '/Users/example/Agent Context Broker/cli.mjs' '--runtime-home' '/Users/example/Library/Application Support/AgentContextBroker'"
     );
+  });
+
+  test('an explicit runtime path is pinned as given, and a vanished runtime makes the installation unhealthy', () => {
+    const root = testRoot('runtime-path');
+    const input = options(root);
+    // A stable entry such as a Homebrew or nvm symlink must survive as written, not as its versioned real path.
+    const link = join(root, `pinned-node${extname(process.execPath)}`);
+    try {
+      symlinkSync(process.execPath, link, 'file');
+    } catch (error) {
+      if (error?.code === 'EPERM' || error?.code === 'EACCES') return; // symlinks need privileges here
+      throw error;
+    }
+    input.runtimePath = link;
+    const plan = manageInstallation(input);
+    assert.equal(plan.runtime.path, link);
+    const { state } = executeInstall(input);
+    assert.equal(state.runtime.path, link);
+    const commands = JSON.parse(readFileSync(join(input.codexHome, 'hooks.json'), 'utf8')).hooks.SessionStart
+      .flatMap((group) => group.hooks).map((hook) => hook.command);
+    assert.ok(commands.some((command) => command.includes(link) && command.includes('cli.mjs')));
+
+    const healthy = verifyInstallation({ runtimeHome: input.runtimeHome });
+    assert.equal(healthy.healthy, true);
+    assert.equal(healthy.runtime.present, true);
+    assert.equal(healthy.runtime.supported, true);
+    assert.equal(healthy.runtime.reportedVersion, state.runtime.version);
+
+    const statePath = join(input.runtimeHome, 'install-state.json');
+    const stored = JSON.parse(readFileSync(statePath, 'utf8'));
+    stored.runtime.path = join(root, 'missing', 'node');
+    writeFileSync(statePath, `${JSON.stringify(stored, null, 2)}\n`, 'utf8');
+    const broken = verifyInstallation({ runtimeHome: input.runtimeHome });
+    assert.equal(broken.healthy, false);
+    assert.equal(broken.runtime.present, false);
+    assert.equal(broken.runtime.supported, false);
   });
 });

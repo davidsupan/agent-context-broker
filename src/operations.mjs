@@ -17,6 +17,7 @@ import {
   persistLifecycleOutbox
 } from './lifecycle-events.mjs';
 import { stableJson, verifyEventStore } from './event-store.mjs';
+import { inspectInstalledRuntime } from './runtime.mjs';
 
 function sha256(value) {
   return createHash('sha256').update(String(value), 'utf8').digest('hex');
@@ -249,6 +250,21 @@ export function diagnoseBroker(inputOptions = {}) {
         status: 'present',
         eventHeadHash: readModelManifest.sourceHeadHash ?? null,
         manifestHash: sha256(stableJson(readModelManifest))
-      }
+      },
+    installedRuntime: installedRuntimeStatus(runtimeRoot)
   };
+}
+
+// In the standard layout the runtime root is `<runtime home>/runtime/<store>`, so the installation state
+// sits two directories up. Hooks fail open, which is why a pinned runtime that vanished is reported here.
+function installedRuntimeStatus(runtimeRoot) {
+  const home = dirname(dirname(runtimeRoot));
+  const statePath = join(home, 'install-state.json');
+  if (basename(dirname(runtimeRoot)).toLowerCase() !== 'runtime' || !existsSync(statePath)) return { status: 'not-recorded' };
+  try {
+    const runtime = inspectInstalledRuntime(JSON.parse(readFileSync(statePath, 'utf8')).runtime);
+    return { status: runtime.supported ? 'ok' : runtime.present ? 'unsupported' : 'missing', ...runtime };
+  } catch {
+    return { status: 'unreadable' };
+  }
 }
