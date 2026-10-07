@@ -504,8 +504,11 @@ describe('explicit fixture runner, never live authority', () => {
           expect(JSON.parse(String(opts.stdin)).untrustedSlice.sliceId).toBe(r.slice.sliceId);
           if (provider === 'codex') expect(JSON.parse(readFileSync(opts.args.at(-2)!, 'utf8'))).toEqual(modelOutputSchema(r.slice));
           const raw = provider === 'claude' ? JSON.stringify(claude(output(r))) : jsonl(codex(output(r)));
+          // The fixture output travels as a file the child reads, never as code.
+          const rawFile = join(mkdtempSync(join(tmpdir(), 'acb-fixture-output-')), 'output.txt');
+          writeFileSync(rawFile, raw);
           return runContained({ ...opts, executable: process.execPath,
-            args: ['-e', `process.stdin.resume(); process.stdin.on('end', () => process.stdout.write(${JSON.stringify(raw)}));`] });
+            args: ['-e', "process.stdin.resume(); process.stdin.on('end', () => process.stdout.write(require('node:fs').readFileSync(process.argv[1], 'utf8')));", rawFile] });
         } });
         expect((await runner.preflight()).invoked).toBe(false);
         const value = await runner(r);
