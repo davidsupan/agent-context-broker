@@ -44,6 +44,15 @@ npm run validate
 npm pack --dry-run
 ```
 
+Type-check the JavaScript sources with `tsc --checkJs`. The check fails only on errors that `typecheck-baseline.json` does not already hold:
+
+```sh
+npm ci --ignore-scripts
+npm run typecheck
+```
+
+When you fix a known error, shrink the baseline with `node scripts/check-types.mjs --update`. The update is refused while any error is new, so the baseline can only shrink.
+
 ## Keep data safe
 
 Do not include real transcripts, credentials, secrets, personal paths, internal URLs, proprietary ticket data, or private organizational data in issues, fixtures, documentation, or pull requests. For suspected vulnerabilities, follow [`SECURITY.md`](SECURITY.md) and report them privately rather than publishing sensitive details.

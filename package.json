@@ -54,6 +54,11 @@
     "test": "node --test --test-timeout=60000 \"test/**/*.test.mjs\" \"providers/codex/test/**/*.test.mjs\" \"providers/claude-code/test/**/*.test.mjs\"",
     "test:bun": "bun test --timeout 60000 test providers/codex/test providers/claude-code/test",
     "validate": "npm run check && npm run test",
-    "validate:bun": "bun scripts/check-package.mjs && npm run test:bun"
+    "validate:bun": "bun scripts/check-package.mjs && npm run test:bun",
+    "typecheck": "node scripts/check-types.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.1",
+    "typescript": "7.0.2"
   }
 }
