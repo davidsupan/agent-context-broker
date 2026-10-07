@@ -32,7 +32,7 @@ import { basename, join, relative, resolve } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { PassThrough } from 'node:stream';
 import { constants, createZstdCompress, createZstdDecompress } from 'node:zlib';
-import { runtimeInfo } from '../src/runtime.mjs';
+import { runtimeInfo } from '../src/runtime.mts';
 
 function parseArgs(argv) {
   const options = { level: 9, minAgeHours: 24, limit: Infinity, execute: false };

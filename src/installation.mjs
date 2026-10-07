@@ -21,7 +21,7 @@ import { fileURLToPath } from 'node:url';
 
 import { defaultRuntimeHome } from './platform-paths.mjs';
 import { POLICY_FILE, parseProviderPolicy } from './provider-policy.mjs';
-import { assertSupportedRuntime, inspectInstalledRuntime, runtimeInfo } from './runtime.mjs';
+import { assertSupportedRuntime, inspectInstalledRuntime, runtimeInfo } from './runtime.mts';
 
 export const MINIMUM_BUN_VERSION = '1.4.0';
 

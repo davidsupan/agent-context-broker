@@ -53,6 +53,17 @@ npm run typecheck
 
 When you fix a known error, shrink the baseline with `node scripts/check-types.mjs --update`. The update is refused while any error is new, so the baseline can only shrink.
 
+## TypeScript sources
+
+The sources are moving from JavaScript (`.mjs`) to TypeScript (`.mts`) one module at a time. The rules:
+
+- A migrated module is `name.mts` beside where `name.mjs` was, renamed with `git mv`. Importers name it with its real extension, `./name.mts`.
+- Only erasable syntax is allowed (`erasableSyntaxOnly`): types, interfaces and `import type`. No enums, no namespaces and no parameter properties, because Node and Bun run the sources by stripping types.
+- A `.mts` file must be clean under `strict`. The baseline never holds an error in one.
+- A file that the runtime names by path stays a thin `.mjs` entry point that imports its `.mts` logic. That covers `src/cli.mjs`, the provider bridges and CLIs, the scripts the launchers and installer start, and the required files in `scripts/check-package.mjs`.
+- The package ships JavaScript only. `npm run build` stages `build/package`, strips every `.mts` to `.mjs` with line numbers kept, and rewrites the imports. Release with `npm run pack:package`, never with a plain `npm pack` of the source tree.
+- Tests stay `.mjs` and run against the sources. The `test-package` job runs the same tests against the staged package.
+
 ## Keep data safe
 
 Do not include real transcripts, credentials, secrets, personal paths, internal URLs, proprietary ticket data, or private organizational data in issues, fixtures, documentation, or pull requests. For suspected vulnerabilities, follow [`SECURITY.md`](SECURITY.md) and report them privately rather than publishing sensitive details.

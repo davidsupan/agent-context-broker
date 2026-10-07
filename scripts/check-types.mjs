@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// Type-checks the JavaScript sources with `tsc --checkJs` against a committed baseline. The gate fails only on
-// errors the baseline does not hold, so existing errors can be fixed one at a time and new ones cannot creep in.
+// Type-checks the sources with `tsc` (strict, --checkJs for the JavaScript) against a committed baseline. The gate
+// fails only on errors the baseline does not hold, so existing errors can be fixed one at a time and new ones
+// cannot creep in. Migrated TypeScript files (.mts) have no baseline: any error in one fails the gate.
 // An error is keyed by file, code and message, without line numbers, so an unrelated edit does not move it.
 //
 //   node scripts/check-types.mjs            check against typecheck-baseline.json
@@ -37,6 +38,13 @@ for (const line of lines) {
 if (unparsed) {
   process.stderr.write(`tsc reported ${unparsed} error(s) outside a source file; fix the configuration first.\n${lines.filter((l) => /error TS/.test(l)).slice(0, 5).join('\n')}\n`);
   process.exit(2);
+}
+
+// TypeScript sources (.mts) are migrated files: they must be clean, so the baseline never holds them.
+const typescriptErrors = Object.keys(counts).filter((key) => /\.mts \| /.test(key));
+if (typescriptErrors.length) {
+  for (const key of typescriptErrors) process.stderr.write(`migrated file must be clean: ${key} (${counts[key]})\n`);
+  process.exit(1);
 }
 
 const baseline = existsSync(baselinePath) ? JSON.parse(readFileSync(baselinePath, 'utf8')).errors ?? {} : {};

@@ -126,3 +126,6 @@ tmp/
 !/site/**
 
 # End of https://www.toptal.com/developers/gitignore/api/node,windows,macos,visualstudiocode
+
+# Staged package (scripts/build-package.mjs)
+build/
