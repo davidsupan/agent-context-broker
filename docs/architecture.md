@@ -242,7 +242,7 @@ platform default (`%LOCALAPPDATA%\AgentContextBroker` on Windows). That
 resolution is where "the live broker" begins, not where it ends. On one
 workstation the same pathname resolved to different directories from different
 processes: a native elevated process followed a junction into an older
-`…\Ocean\…` tree, while harness-spawned processes — including the agents' own
+host application's folder tree (`…\<host>\…`), while harness-spawned processes — including the agents' own
 hooks — saw separate directories with different chains. Each verified cleanly.
 Work done against any one of them (ingestion, publication, repair) is invisible
 to a reader in another.

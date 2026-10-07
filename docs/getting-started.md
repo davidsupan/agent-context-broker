@@ -122,7 +122,7 @@ The high-level launcher chooses a private runtime directory below:
 bridges export it. The pathname alone does not identify the store: on one
 Windows workstation the same `…\runtime` path resolved to different directories
 from different processes (a native elevated process saw a junction into an older
-`…\Ocean\AgentContextBroker` tree; harness-spawned processes, including the
+host application's `…\<host>\AgentContextBroker` tree; harness-spawned processes, including the
 agents' hooks, saw a separate directory). A store that verifies cleanly in one
 view proves nothing about the store another process reads.
 
