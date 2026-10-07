@@ -1,6 +1,6 @@
 {
   "name": "agent-context-broker-claude-code-provider",
-  "version": "0.12.0-beta.2",
+  "version": "0.12.0-beta.3",
   "private": true,
   "type": "module",
   "scripts": {
