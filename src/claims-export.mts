@@ -189,5 +189,5 @@ export function exportClaims(options: ExportOptions): ExportResult {
 export function capabilities(): { schemaVersion: 1; version: string | null; commands: string[] } {
   let version: string | null = null;
   try { version = String(JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version); } catch { /* unknown */ }
-  return { schemaVersion: 1, version, commands: ['capabilities', 'claims-export', 'context-query', 'context-publish', 'progress-publish', 'doctor'] };
+  return { schemaVersion: 1, version, commands: ['capabilities', 'claims-export', 'claims-withdraw', 'context-query', 'context-publish', 'progress-publish', 'doctor'] };
 }

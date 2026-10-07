@@ -84,11 +84,11 @@ function stableValue(value) {
   return value;
 }
 
-function stableJson(value) {
+export function stableJson(value) {
   return JSON.stringify(stableValue(value));
 }
 
-function hash(value) {
+export function hash(value) {
   return createHash('sha256').update(String(value), 'utf8').digest('hex');
 }
 
@@ -108,11 +108,11 @@ function atomicWrite(path, value) {
   }
 }
 
-function writeJson(path, value) {
+export function writeJson(path, value) {
   atomicWrite(path, `${JSON.stringify(value, null, 2)}\n`);
 }
 
-function readJson(path, fallback) {
+export function readJson(path, fallback) {
   return existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : fallback;
 }
 
@@ -120,7 +120,7 @@ function delay(milliseconds) {
   return new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds));
 }
 
-async function withLock(path, options, action) {
+export async function withLock(path, options, action) {
   mkdirSync(dirname(path), { recursive: true });
   const startedAt = Date.now();
   let descriptor;
@@ -178,7 +178,7 @@ function initialState() {
   };
 }
 
-function loadState(path) {
+export function loadState(path) {
   const state = readJson(path, initialState());
   if (
     state.schemaVersion !== 1 ||
@@ -518,7 +518,7 @@ function acceptedRegistry(state) {
   };
 }
 
-function synchronizeRegistry(root, state) {
+export function synchronizeRegistry(root, state) {
   const path = join(root, 'accepted-snapshots.json');
   const expected = acceptedRegistry(state);
   const current = readJson(path, null);
@@ -618,7 +618,7 @@ function reconciliationEvents(batch, analysis, result, claimIndex) {
   return events;
 }
 
-function persistOutbox(root, batchKey, result, events) {
+export function persistOutbox(root, batchKey, result, events) {
   if (events.length === 0) return;
   writeJson(join(root, 'outbox', 'pending', `${batchKey}.json`), {
     schemaVersion: 1,
@@ -628,7 +628,7 @@ function persistOutbox(root, batchKey, result, events) {
   });
 }
 
-async function deliverCommittedOutbox(root, state, eventRuntimeRoot) {
+export async function deliverCommittedOutbox(root, state, eventRuntimeRoot) {
   const pendingRoot = join(root, 'outbox', 'pending');
   if (!existsSync(pendingRoot)) return 0;
   let delivered = 0;

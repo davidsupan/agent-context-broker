@@ -55,3 +55,17 @@ agent-context-broker claims-export --provider claude-code --home "$AGENT_CONTEXT
 | 4 | The provider policy is invalid, so the command fails closed |
 
 A broker older than this command has no `capabilities` command. Treat any non-zero exit from `capabilities` as "unsupported".
+
+## Withdrawing a claim
+
+`claims-withdraw` removes accepted claims from the person's memory:
+
+```sh
+agent-context-broker claims-withdraw --home "$AGENT_CONTEXT_BROKER_HOME" --claim <claimId> --reason "rule removed" --json            # plan
+agent-context-broker claims-withdraw --home "$AGENT_CONTEXT_BROKER_HOME" --claim <claimId> --reason "rule removed" --execute --json  # withdraw
+```
+
+- The claim leaves the current snapshot of its scope. A scope with nothing left leaves the registry. Context queries and exports no longer see it.
+- The stored content is deleted for the claim and for every earlier version of its key. That covers the claim files, its candidate copies in rejected-batch reviews, and the query, ticket and thread audit artifacts that rendered its value. A version that is still current in another scope is kept.
+- The event chain stays append-only and keeps hashes only: one `claim.superseded` event per claim with `disposition: withdrawn` and no replacement, plus a `snapshot.published` event. Both are event types that older brokers already verify. A receipt with hashes and counts is written under `withdrawals/`.
+- The command plans by default and writes only with `--execute`. Exit 0 means ok. Exit 2 means a usage error or a claim that is not current. Exit 3 means the event store does not verify, and nothing is changed.

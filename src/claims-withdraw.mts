@@ -1,0 +1,222 @@
+// Withdrawing accepted claims, for the person whose memory this is: a withdrawn claim leaves the current snapshot
+// of its scope, and the content the broker stored for it is deleted, for the claim and for every earlier version of
+// its key. That covers the claim files, the candidate copies in rejected-batch reviews and the query-audit artifacts
+// that rendered its value. Readers (context-query, claims-export) never see it again.
+//
+// The event chain is append-only and keeps hashes only, as it always has: one `claim.superseded` event per claim,
+// with `disposition: withdrawn` and no replacement, plus `snapshot.published` for the new snapshot. Both are event
+// types older brokers already verify. The work goes through the reconciliation lock, state and outbox, so a crash
+// part-way leaves either the old state or the new one, and the events are delivered on the next run.
+
+import { existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { randomUUID } from 'node:crypto';
+
+import {
+  deliverCommittedOutbox, hash, loadState, persistOutbox, readJson, stableJson, synchronizeRegistry, withLock, writeJson,
+} from './reconciliation.mjs';
+
+const HASH = /^[a-f0-9]{64}$/u;
+const MIN_VALUE_TEXT = 12;
+const LOCK = { lockTimeoutMs: 5000, lockRetryMs: 50, lockStaleMs: 600000 };
+
+type IndexEntry = { claimId: string; valueHash: string; canonicalRefs?: string[] };
+type ScopeEntry = { scopeKey: string; snapshotId: string; snapshotHash: string; version: number; claimIndex: Record<string, IndexEntry>; relationKeys: string[]; canonicalRefs: string[] };
+type State = { schemaVersion: 1; revision: number; updatedAt: string; scopes: Record<string, ScopeEntry>; batches: Record<string, unknown> };
+type StoredClaim = { claimId: string; claimKey: string; valueHash: string; value: unknown; supersedes: string | null; [field: string]: unknown };
+
+export type WithdrawOptions = {
+  runtimeRoot: string;
+  eventRuntimeRoot?: string;
+  claimIds: string[];
+  /** Why, in a few words; only its hash is stored. */
+  reason: string;
+  /** Folders whose JSON artifacts may carry rendered claim text (query, ticket and thread audits). */
+  auditRoots?: string[];
+  execute?: boolean;
+  now?: Date;
+};
+
+export type WithdrawPlan = {
+  schemaVersion: 1;
+  writesEnabled: boolean;
+  claims: Array<{ claimId: string; claimKey: string; scopeKey: string; versions: string[] }>;
+  scopes: Array<{ scopeKey: string; remainingClaims: number; scopeRemoved: boolean }>;
+  deletes: { claimFiles: number; reviewCandidates: number; auditArtifacts: number };
+};
+
+function storedClaim(root: string, claimId: string): StoredClaim | null {
+  return HASH.test(claimId) ? (readJson(join(root, 'claims', `${claimId}.json`), null) as StoredClaim | null) : null;
+}
+
+/** The claim and every earlier version it supersedes, newest first. */
+function versionChain(root: string, claimId: string): StoredClaim[] {
+  const chain: StoredClaim[] = [];
+  const seen = new Set<string>();
+  let next: string | null = claimId;
+  while (next && !seen.has(next)) {
+    seen.add(next);
+    const claim = storedClaim(root, next);
+    if (!claim) break;
+    chain.push(claim);
+    next = typeof claim.supersedes === 'string' ? claim.supersedes : null;
+  }
+  return chain;
+}
+
+const valueText = (value: unknown) => (typeof value === 'string' ? value : stableJson(value));
+
+function jsonFiles(dir: string): string[] {
+  if (!existsSync(dir)) return [];
+  const out: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...jsonFiles(path));
+    else if (entry.isFile() && entry.name.endsWith('.json') && statSync(path).size <= 8 * 1024 * 1024) out.push(path);
+  }
+  return out;
+}
+
+/** Everything a withdrawal would change, computed without writing. */
+function analyse(root: string, state: State, options: WithdrawOptions) {
+  const ids = [...new Set(options.claimIds)];
+  if (!ids.length || ids.some(id => !HASH.test(id))) throw new Error('Claim withdrawal needs one or more claim ids.');
+  if (typeof options.reason !== 'string' || !options.reason.trim()) throw new Error('Claim withdrawal needs a reason.');
+  const targets: Array<{ claimId: string; claimKey: string; scopeKey: string; chain: StoredClaim[] }> = [];
+  for (const claimId of ids) {
+    const scope = Object.values(state.scopes).find(entry => Object.values(entry.claimIndex).some(item => item.claimId === claimId));
+    if (!scope) throw new Error(`Claim ${claimId.slice(0, 12)} is not a current accepted claim.`);
+    const claimKey = Object.entries(scope.claimIndex).find(([, item]) => item.claimId === claimId)![0];
+    targets.push({ claimId, claimKey, scopeKey: scope.scopeKey, chain: versionChain(root, claimId) });
+  }
+  // A version still current in another scope is kept (the same content accepted twice).
+  const currentElsewhere = new Set(Object.values(state.scopes).flatMap(entry => Object.values(entry.claimIndex).map(item => item.claimId)));
+  for (const t of targets) currentElsewhere.delete(t.claimId);
+  const deleteIds = new Set(targets.flatMap(t => t.chain.map(c => c.claimId)).filter(id => !currentElsewhere.has(id)));
+  const valueHashes = new Set(targets.flatMap(t => t.chain.map(c => c.valueHash)));
+  const keyHashes = new Set(targets.map(t => hash(t.claimKey)));
+  const texts = [...new Set(targets.flatMap(t => t.chain.map(c => valueText(c.value))).filter(text => text.length >= MIN_VALUE_TEXT))];
+
+  // Rejected-batch reviews keep candidate claims with their values.
+  const reviews: Array<{ path: string; review: Record<string, any>; keep: unknown[]; removed: number }> = [];
+  for (const path of jsonFiles(join(root, 'review'))) {
+    const review = readJson(path, null) as Record<string, any> | null;
+    if (!review || !Array.isArray(review.candidateClaims)) continue;
+    const keep = review.candidateClaims.filter((c: Record<string, any>) => !(keyHashes.has(c?.claimKey) && valueHashes.has(hash(stableJson(c?.value)))));
+    if (keep.length !== review.candidateClaims.length) reviews.push({ path, review, keep, removed: review.candidateClaims.length - keep.length });
+  }
+  // Audit artifacts that rendered the value into an injected context.
+  const artifacts = (options.auditRoots ?? []).flatMap(dir => jsonFiles(dir)).filter(path => {
+    try { const text = readFileSync(path, 'utf8'); return texts.some(value => text.includes(JSON.stringify(value).slice(1, -1))); } catch { return false; }
+  });
+
+  const removedKeys = new Map<string, Set<string>>();
+  for (const t of targets) { if (!removedKeys.has(t.scopeKey)) removedKeys.set(t.scopeKey, new Set()); removedKeys.get(t.scopeKey)!.add(t.claimKey); }
+  const scopes = [...removedKeys.entries()].map(([scopeKey, keys]) => {
+    const entry = state.scopes[scopeKey]!;
+    const remaining = Object.fromEntries(Object.entries(entry.claimIndex).filter(([key]) => !keys.has(key)));
+    return { scopeKey, entry, remaining };
+  });
+  return { targets, deleteIds, reviews, artifacts, scopes };
+}
+
+function planOf(a: ReturnType<typeof analyse>, writesEnabled: boolean): WithdrawPlan {
+  return {
+    schemaVersion: 1,
+    writesEnabled,
+    claims: a.targets.map(t => ({ claimId: t.claimId, claimKey: t.claimKey, scopeKey: t.scopeKey, versions: t.chain.map(c => c.claimId) })),
+    scopes: a.scopes.map(s => ({ scopeKey: s.scopeKey, remainingClaims: Object.keys(s.remaining).length, scopeRemoved: Object.keys(s.remaining).length === 0 })),
+    deletes: { claimFiles: a.deleteIds.size, reviewCandidates: a.reviews.reduce((n, r) => n + r.removed, 0), auditArtifacts: a.artifacts.length },
+  };
+}
+
+/** What a withdrawal would do; writes nothing. */
+export function planClaimWithdrawal(options: WithdrawOptions): WithdrawPlan {
+  const root = resolve(options.runtimeRoot);
+  const state = loadState(join(root, 'state.json')) as State;
+  return planOf(analyse(root, state, options), false);
+}
+
+/** Withdraws the claims and deletes their stored content; requires execute: true. */
+export async function withdrawClaims(options: WithdrawOptions): Promise<WithdrawPlan & { withdrawalId: string; snapshots: Array<{ scopeKey: string; snapshotHash: string | null }> }> {
+  if (options.execute !== true) throw new Error('Claim withdrawal writes require execute: true.');
+  const root = resolve(options.runtimeRoot);
+  const statePath = join(root, 'state.json');
+  return withLock(join(root, 'state.lock'), LOCK, async () => {
+    const state = loadState(statePath) as State;
+    synchronizeRegistry(root, state);
+    await deliverCommittedOutbox(root, state, options.eventRuntimeRoot ?? root);
+    const a = analyse(root, state, options);
+    const now = (options.now ?? new Date()).toISOString();
+    const withdrawalId = randomUUID();
+    const batchKey = hash(`withdraw:${withdrawalId}`);
+    const events: unknown[] = [];
+    const snapshots: Array<{ scopeKey: string; snapshotHash: string | null }> = [];
+
+    for (const scope of a.scopes) {
+      const claimIds = Object.values(scope.remaining).map(item => item.claimId).sort();
+      const canonicalRefs = [...new Set(Object.values(scope.remaining).flatMap(item => item.canonicalRefs ?? []))].sort();
+      const old = readJson(join(root, 'snapshots', `${scope.entry.snapshotId}.json`), null) as Record<string, any> | null;
+      if (!claimIds.length || !canonicalRefs.length) {
+        // Nothing left in the scope: it leaves the registry altogether.
+        delete state.scopes[scope.scopeKey];
+        snapshots.push({ scopeKey: scope.scopeKey, snapshotHash: null });
+        continue;
+      }
+      const snapshotCore = {
+        schemaVersion: 1, snapshotId: randomUUID(), version: scope.entry.version + 1, baseSnapshotHash: scope.entry.snapshotHash,
+        scope: old?.scope ?? null, createdAt: now, claimIds, relationKeys: scope.entry.relationKeys, canonicalRefs, state: 'clean',
+      };
+      const snapshotHash = hash(stableJson(snapshotCore));
+      writeJson(join(root, 'snapshots', `${snapshotCore.snapshotId}.json`), { ...snapshotCore, snapshotHash, digest: snapshotHash });
+      state.scopes[scope.scopeKey] = { ...scope.entry, snapshotId: snapshotCore.snapshotId, snapshotHash, version: snapshotCore.version, claimIndex: scope.remaining, canonicalRefs };
+      snapshots.push({ scopeKey: scope.scopeKey, snapshotHash });
+      const scopeRef = old?.scope && typeof old.scope.kind === 'string' && typeof old.scope.key === 'string'
+        ? { kind: old.scope.kind, keyHash: hash(old.scope.key) } : null;
+      if (scopeRef) {
+        events.push({
+          idempotencyKey: hash(`withdraw:${withdrawalId}:snapshot:${snapshotHash}`), eventType: 'snapshot.published', occurredAt: now,
+          provider: 'system', scope: scopeRef, taskKeyHash: scopeRef.kind === 'ticket' ? scopeRef.keyHash : null, threadKey: null,
+          sourceRefs: claimIds.map(id => `acb://claim/${id}`), subjectRef: `acb://snapshot/${snapshotHash}`,
+          replacesRef: `acb://snapshot/${scope.entry.snapshotHash}`, evidenceRefs: [`acb://audit/${hash(withdrawalId)}`], confidence: 1,
+          freshness: { status: 'current', policy: 'immutable', verifiedAt: now, expiresAt: null, sourceHeadHash: null },
+          sensitivity: 'private', redactionResult: 'clean', approvalState: 'approved',
+          payload: { snapshotVersion: snapshotCore.version, withdrawnClaimCount: a.targets.filter(t => t.scopeKey === scope.scopeKey).length },
+        });
+      }
+    }
+    for (const t of a.targets) {
+      const snapshot = readJson(join(root, 'snapshots', `${a.scopes.find(s => s.scopeKey === t.scopeKey)!.entry.snapshotId}.json`), null) as Record<string, any> | null;
+      const scopeRef = snapshot?.scope && typeof snapshot.scope.key === 'string' ? { kind: snapshot.scope.kind, keyHash: hash(snapshot.scope.key) } : null;
+      if (!scopeRef) continue;
+      events.push({
+        idempotencyKey: hash(`withdraw:${withdrawalId}:${t.claimId}`), eventType: 'claim.superseded', occurredAt: now, provider: 'system',
+        scope: scopeRef, taskKeyHash: scopeRef.kind === 'ticket' ? scopeRef.keyHash : null, threadKey: null, sourceRefs: [],
+        subjectRef: `acb://claim/${t.claimId}`, replacesRef: null, evidenceRefs: [`acb://audit/${hash(withdrawalId)}`], confidence: 1,
+        freshness: { status: 'current', policy: 'immutable', verifiedAt: now, expiresAt: null, sourceHeadHash: null },
+        sensitivity: 'private', redactionResult: 'clean', approvalState: 'approved',
+        payload: { disposition: 'withdrawn', reasonHash: hash(options.reason.trim()), versionCount: t.chain.length },
+      });
+    }
+
+    const result = { schemaVersion: 1, withdrawalId, checkedAt: now, state: 'clean', withdrawnClaimCount: a.targets.length,
+      deletedClaimFiles: a.deleteIds.size, writesEnabled: true };
+    state.revision += 1;
+    state.updatedAt = now;
+    state.batches[batchKey] = result;
+    persistOutbox(root, batchKey, result, events);
+    writeJson(statePath, state);
+    synchronizeRegistry(root, state);
+    // The content goes only after the new state no longer names it.
+    for (const id of a.deleteIds) rmSync(join(root, 'claims', `${id}.json`), { force: true });
+    for (const r of a.reviews) writeJson(r.path, { ...r.review, candidateClaims: r.keep, withdrawnCandidateCount: (r.review.withdrawnCandidateCount ?? 0) + r.removed });
+    for (const path of a.artifacts) rmSync(path, { force: true });
+    writeJson(join(root, 'withdrawals', `${withdrawalId}.json`), {
+      schemaVersion: 1, withdrawalId, withdrawnAt: now, reasonHash: hash(options.reason.trim()),
+      claims: a.targets.map(t => ({ claimId: t.claimId, claimKeyHash: hash(t.claimKey), scopeKey: t.scopeKey, versions: t.chain.length })),
+      deletes: planOf(a, true).deletes,
+    });
+    await deliverCommittedOutbox(root, state, options.eventRuntimeRoot ?? root);
+    return { ...planOf(a, true), withdrawalId, snapshots };
+  });
+}
