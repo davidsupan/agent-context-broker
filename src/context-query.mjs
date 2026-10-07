@@ -19,6 +19,7 @@ import { normalizeAgentDescriptor } from './agent-identity.mts';
 import { loadContextProfiles, routeContextProfile } from './context-router.mts';
 import { readPeerProgress } from './peer-progress.mjs';
 import { policyEntry, scopeReadable } from './provider-policy.mjs';
+import { loadState } from './reconciliation.mjs';
 import { relationsForScope, reviewLedgerContext } from './work-ledgers.mts';
 
 const PROVIDERS = new Set(['codex', 'claude-code']);
@@ -266,6 +267,9 @@ export function verifiedClaim(root, expectedClaimId, maxValueBytes, now) {
  * @param {any} registryEntry an entry of accepted-snapshots.json, validated here
  */
 export function verifiedSnapshotFile(root, registryEntry) {
+  const statePath = join(root, 'state.json');
+  if (!existsSync(statePath)) throw new Error('Reconciliation state is missing.');
+  const state = loadState(statePath);
   if (!SNAPSHOT_ID.test(String(registryEntry?.snapshotId ?? ''))) {
     throw new Error('Accepted snapshot registry contains an invalid identifier.');
   }
@@ -285,7 +289,54 @@ export function verifiedSnapshotFile(root, registryEntry) {
       !validReferences(snapshot.canonicalRefs)) {
     throw new Error('Accepted snapshot verification failed.');
   }
-  return snapshot;
+  const key = snapshot.scope && typeof snapshot.scope.kind === 'string' && typeof snapshot.scope.key === 'string'
+    ? `${snapshot.scope.kind}:${hash(snapshot.scope.key)}` : null;
+  if (!key) throw new Error('Accepted snapshot scope is invalid.');
+  const current = state.scopes[key]?.claimIndex ?? {};
+  const allowed = new Set(Object.entries(current)
+    .filter(([claimKey]) => !state.tombstones?.[key]?.[hash(claimKey)])
+    .map(([, item]) => item.claimId));
+  return { ...snapshot, claimIds: snapshot.claimIds.filter((/** @type {string} */ claimId) => allowed.has(claimId)) };
+}
+
+const SNAPSHOT_ROLE_RANK = { primary: 0, 'ambient-project': 1, 'ambient-global': 2 };
+
+/**
+ * Where a related snapshot ranks before the snapshot cap: by its own scope's role in the query (the requested scope,
+ * then the ambient project, then global rules, then any other related scope, then a snapshot related only through
+ * its relation keys),
+ * then by when it was created. Unreadable snapshots rank last; verification still rejects them if selected.
+ * @param {string} root @param {any} entry @param {Map<string, string>} scopeRelations
+ */
+function snapshotRank(root, entry, scopeRelations) {
+  const id = String(entry?.snapshotId ?? '');
+  let snapshot = null;
+  try { snapshot = SNAPSHOT_ID.test(id) ? readJson(join(root, 'snapshots', `${id}.json`)) : null; } catch { /* Ranks last. */ }
+  const scope = snapshot?.scope;
+  const own = scope && typeof scope.kind === 'string' && typeof scope.key === 'string'
+    ? scopeRelations.get(scopeRelation(scope.kind, scope.key)) : undefined;
+  const role = own === undefined ? 4 : (SNAPSHOT_ROLE_RANK[/** @type {keyof typeof SNAPSHOT_ROLE_RANK} */ (own)] ?? 3);
+  return { role, createdAt: typeof snapshot?.createdAt === 'string' ? snapshot.createdAt : '' };
+}
+
+/**
+ * Global rules apply everywhere, so the global-scope snapshots of the registry join every query as ambient scopes,
+ * unless the caller turns that off or a provider's read rules do not allow the scope. Their keys are read from the
+ * snapshot files; verification still happens on the selected ones.
+ * @param {string} root @param {any[]} snapshots @param {any} rule
+ */
+function ambientGlobalRelations(root, snapshots, rule) {
+  /** @type {string[]} */
+  const relations = [];
+  for (const entry of snapshots) {
+    if (entry?.state !== 'clean' || !SNAPSHOT_ID.test(String(entry?.snapshotId ?? ''))) continue;
+    let scope = null;
+    try { scope = readJson(join(root, 'snapshots', `${entry.snapshotId}.json`))?.scope ?? null; } catch { continue; }
+    if (scope?.kind !== 'global' || typeof scope.key !== 'string') continue;
+    if (rule?.read && !scopeReadable(rule, { kind: 'global', key: scope.key })) continue;
+    relations.push(scopeRelation('global', scope.key));
+  }
+  return relations;
 }
 
 function verifiedSnapshot(root, registryEntry, profile, options, now) {
@@ -346,7 +397,10 @@ function relevance(claim, snapshot, profile, queryTerms, options) {
   // broad enough that term filtering is what keeps the result usable, and related
   // scopes still require a term match so a parent ticket cannot flood the query.
   const narrowScope = ['ticket', 'merge-request'].includes(options.scopeKind);
-  if (queryTerms.length > 0 && queryMatches === 0 && !(narrowScope && exactScope >= 4)) return -1;
+  // Global rules are ambient: they apply whatever the task is about, so they skip the term filter and rank below
+  // every claim that matched a term.
+  const ambientGlobal = snapshot.scope?.kind === 'global' && options.scopeKind !== 'global';
+  if (queryTerms.length > 0 && queryMatches === 0 && !(narrowScope && exactScope >= 4) && !ambientGlobal) return -1;
   return (queryMatches * 8) + (profileMatches * 2) + exactScope +
     (claim.providers.includes(options.provider) ? 0 : 1);
 }
@@ -603,15 +657,28 @@ async function buildContextQuery(inputOptions = {}) {
   if (registry.schemaVersion !== 1 || !Array.isArray(registry.snapshots)) {
     throw new Error('Accepted snapshot registry is invalid.');
   }
+  if (!existsSync(join(root, 'state.json'))) throw new Error('Reconciliation state is missing.');
+  loadState(join(root, 'state.json'));
 
   const scopeRelations = acceptedScopeRelations(options);
+  const { ambientGlobal, scopeKind } = /** @type {any} */ (options);
+  if (ambientGlobal !== false && scopeKind !== 'global') {
+    for (const relationKey of ambientGlobalRelations(root, registry.snapshots, rule)) {
+      if (!scopeRelations.has(relationKey)) scopeRelations.set(relationKey, 'ambient-global');
+    }
+  }
   const scopedOptions = { ...options, scopeRelations };
   if (scopeRelations.size > 1) base.warnings.push('scope-relations-expanded');
   const entries = registry.snapshots
     .filter((entry) => entry?.state === 'clean')
     .filter((entry) => Array.isArray(entry.relationKeys) &&
       entry.relationKeys.some((relationKey) => scopeRelations.has(relationKey)))
-    .sort((left, right) => Number(right.version ?? 0) - Number(left.version ?? 0));
+    .map((/** @type {any} */ entry) => ({ entry, rank: snapshotRank(root, entry, scopeRelations) }))
+    .sort((left, right) =>
+      left.rank.role - right.rank.role ||
+      right.rank.createdAt.localeCompare(left.rank.createdAt) ||
+      Number(right.entry.version ?? 0) - Number(left.entry.version ?? 0))
+    .map((/** @type {{ entry: any }} */ { entry }) => entry);
   const selectedEntries = entries.slice(0, route.profile.maxSnapshots);
   if (entries.length > selectedEntries.length) base.warnings.push('accepted-snapshot-limit-reached');
   let claimReadLimitReached = false;

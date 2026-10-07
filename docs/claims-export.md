@@ -60,12 +60,14 @@ A broker older than this command has no `capabilities` command. Treat any non-ze
 
 `claims-withdraw` removes accepted claims from the person's memory:
 
+Guarantee: withdrawn from current reads on commit; registered broker copies deleted through recoverable cleanup; reintroduction blocked by tombstones.
+
 ```sh
 agent-context-broker claims-withdraw --home "$AGENT_CONTEXT_BROKER_HOME" --claim <claimId> --reason "rule removed" --json            # plan
 agent-context-broker claims-withdraw --home "$AGENT_CONTEXT_BROKER_HOME" --claim <claimId> --reason "rule removed" --execute --json  # withdraw
 ```
 
 - The claim leaves the current snapshot of its scope. A scope with nothing left leaves the registry. Context queries and exports no longer see it.
-- The stored content is deleted for the claim and for every earlier version of its key. That covers the claim files, its candidate copies in rejected-batch reviews, and the query, ticket and thread audit artifacts that rendered its value. A version that is still current in another scope is kept.
-- The event chain stays append-only and keeps hashes only: one `claim.superseded` event per claim with `disposition: withdrawn` and no replacement, plus a `snapshot.published` event. Both are event types that older brokers already verify. A receipt with hashes and counts is written under `withdrawals/`.
+- The stored content is deleted for the claim and for every earlier version of its key whose ownership is established for the withdrawn scope. That covers claim files, candidate copies in rejected-batch reviews, and configured audit artifacts that rendered its value. A file still referenced by another scope is kept. Ambiguous unlinked files are kept and reported.
+- The event chain stays append-only and keeps hashes only: one `claim.superseded` event per claim with `disposition: withdrawn` and no replacement, plus a `snapshot.published` event. Both are event types that older brokers already verify. A deletion manifest and completion receipt with hashes and counts are written under `withdrawals/`.
 - The command plans by default and writes only with `--execute`. Exit 0 means ok. Exit 2 means a usage error or a claim that is not current. Exit 3 means the event store does not verify, and nothing is changed.

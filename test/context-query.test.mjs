@@ -260,13 +260,13 @@ describe('profiled context query', () => {
     // Without the ambient project, a ticket scope sees none of it: that was the gap.
     const isolated = await planContextQuery({
       provider: 'codex', runtimeRoot, profileId: 'review',
-      scopeKind: 'ticket', scopeKey: 'OC-18404'
+      scopeKind: 'ticket', scopeKey: 'OC-4101'
     });
     assert.deepEqual(isolated.claims, []);
 
     const withProject = await planContextQuery({
       provider: 'codex', runtimeRoot, profileId: 'review',
-      scopeKind: 'ticket', scopeKey: 'OC-18404',
+      scopeKind: 'ticket', scopeKey: 'OC-4101',
       ambientProjectKey: 'example-project'
     });
     assert.deepEqual(withProject.claims.map((claim) => claim.claimKey), ['review.merge-request-rules']);
@@ -275,7 +275,7 @@ describe('profiled context query', () => {
     // The widening is exactly one project, the configured one, and no other.
     const otherProject = await planContextQuery({
       provider: 'codex', runtimeRoot, profileId: 'review',
-      scopeKind: 'ticket', scopeKey: 'OC-18404',
+      scopeKind: 'ticket', scopeKey: 'OC-4101',
       ambientProjectKey: 'someone-elses-project'
     });
     assert.deepEqual(otherProject.claims, []);
@@ -293,19 +293,19 @@ describe('profiled context query', () => {
   test('keeps claims on the working ticket when query terms do not match, and still filters broad scopes', async () => {
     const root = tempRoot('narrow-scope-floor');
     const runtimeRoot = join(root, 'runtime');
-    const ticketScope = { kind: 'ticket', key: 'OC-18404' };
+    const ticketScope = { kind: 'ticket', key: 'OC-4101' };
     await publishClaim(runtimeRoot, {
       claimKey: 'review.merge-request-rules',
       value: 'refresh current MR head before review',
       scope: ticketScope,
-      relationKeys: [`ticket:${hash('oc-18404')}`]
+      relationKeys: [`ticket:${hash('oc-4101')}`]
     });
 
     // Terms that match nothing must not empty the result for the ticket being worked.
     const narrow = await planContextQuery({
       provider: 'codex', runtimeRoot, profileId: 'review',
       terms: ['chargepoint'],
-      scopeKind: 'ticket', scopeKey: 'OC-18404'
+      scopeKind: 'ticket', scopeKey: 'OC-4101'
     });
     assert.deepEqual(narrow.claims.map((claim) => claim.claimKey), ['review.merge-request-rules']);
 
@@ -326,12 +326,12 @@ describe('profiled context query', () => {
     const root = tempRoot('scope-graph');
     const runtimeRoot = join(root, 'runtime');
     const ticketPackagesRoot = join(root, 'tickets');
-    mkdirSync(join(ticketPackagesRoot, 'OC-18404'), { recursive: true });
+    mkdirSync(join(ticketPackagesRoot, 'OC-4101'), { recursive: true });
     writeFileSync(
-      join(ticketPackagesRoot, 'OC-18404', 'jira-context.json'),
+      join(ticketPackagesRoot, 'OC-4101', 'jira-context.json'),
       JSON.stringify({
-        issue: { key: 'OC-18404' },
-        relatedTickets: { parent: { key: 'OC-18000' }, subtasks: [], issueLinks: [] }
+        issue: { key: 'OC-4101' },
+        relatedTickets: { parent: { key: 'OC-4100' }, subtasks: [], issueLinks: [] }
       }),
       'utf8'
     );
@@ -340,13 +340,13 @@ describe('profiled context query', () => {
     await publishClaim(runtimeRoot, {
       claimKey: 'review.merge-request-rules',
       value: 'refresh current MR head before review',
-      scope: { kind: 'ticket', key: 'OC-18000' },
-      relationKeys: [`ticket:${hash('oc-18000')}`]
+      scope: { kind: 'ticket', key: 'OC-4100' },
+      relationKeys: [`ticket:${hash('oc-4100')}`]
     });
 
     const withExpansion = await planContextQuery({
       provider: 'codex', runtimeRoot, profileId: 'review', terms: ['review'],
-      scopeKind: 'ticket', scopeKey: 'OC-18404',
+      scopeKind: 'ticket', scopeKey: 'OC-4101',
       ticketPackagesRoot
     });
     assert.deepEqual(
@@ -358,7 +358,7 @@ describe('profiled context query', () => {
     // Without the ticket package there is no relation to expand, so the parent stays invisible.
     const withoutExpansion = await planContextQuery({
       provider: 'codex', runtimeRoot, profileId: 'review', terms: ['review'],
-      scopeKind: 'ticket', scopeKey: 'OC-18404'
+      scopeKind: 'ticket', scopeKey: 'OC-4101'
     });
     assert.deepEqual(withoutExpansion.claims, []);
     assert.ok(!withoutExpansion.warnings.includes('scope-relations-expanded'));

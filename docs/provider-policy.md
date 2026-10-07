@@ -51,6 +51,7 @@ The JSON schema is `schemas/provider-policy.schema.json`. Example:
 - They apply to hook advisories (peer progress and accepted-context references), to `context-query` and to peer-progress reads.
 - A provider with read rules gets no related-scope expansion, because related scopes are stored as hashes and cannot be matched against patterns.
 - An ambient project is dropped when it is not readable.
+- An ambient global scope is dropped when the read rules do not allow it.
 
 **Publish rules** are checked against the provider bound to the attested source token, before anything is written.
 

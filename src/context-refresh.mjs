@@ -208,6 +208,19 @@ function verifiedSnapshot(root, registryEntry, maxClaims, maxValueBytes) {
   };
 }
 
+/**
+ * When a registry entry's snapshot was created, for ranking only; verification happens on the selected ones.
+ * @param {string} root @param {any} entry
+ */
+function snapshotCreatedAt(root, entry) {
+  const id = String(entry?.snapshotId ?? '');
+  if (!SNAPSHOT_ID.test(id)) return '';
+  try {
+    const snapshot = readJson(join(root, 'snapshots', `${id}.json`));
+    return typeof snapshot?.createdAt === 'string' ? snapshot.createdAt : '';
+  } catch { return ''; }
+}
+
 function acceptedContext(root, relationKeys, options) {
   const registry = readJson(join(root, 'accepted-snapshots.json'));
   if (!registry) {
@@ -220,7 +233,11 @@ function acceptedContext(root, relationKeys, options) {
   const relevant = registry.snapshots
     .filter((entry) => entry?.state === 'clean')
     .filter((entry) => entry.relationKeys?.some((key) => relations.has(key)))
-    .sort((left, right) => Number(right.version ?? 0) - Number(left.version ?? 0));
+    .map((/** @type {any} */ entry) => ({ entry, createdAt: snapshotCreatedAt(root, entry) }))
+    // Newest first: a per-scope version says nothing about another scope's snapshot.
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt) ||
+      Number(right.entry.version ?? 0) - Number(left.entry.version ?? 0))
+    .map((/** @type {{ entry: any }} */ { entry }) => entry);
   const matches = relevant.slice(0, options.maxSnapshots);
   let remainingClaims = options.maxClaims;
   const snapshots = matches.map((entry) => {

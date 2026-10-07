@@ -53,7 +53,7 @@ function usage() {
     '  bun src/cli.mjs sweep --config <json> --runtime-root <path> [--execute] [--minimum-interval-seconds <n>]',
     '  bun src/cli.mjs context-refresh --provider <provider> --source <path> --ledger-dir <path> --runtime-root <path> [--execute --audit-dir <path>]',
     '  bun src/cli.mjs context-route [--profile <id> | --task-kind <kind> | --project-scope] [--strict-isolation]',
-    '  bun src/cli.mjs context-query --provider <provider> --runtime-root <path> --scope-kind <kind> --scope-key <key> [--ambient-project <key>] [--profile <id> | --task-kind <kind> | --project-scope] [--term <value> ...] [--strict-isolation] [--provider-policy <path>]',
+    '  bun src/cli.mjs context-query --provider <provider> --runtime-root <path> --scope-kind <kind> --scope-key <key> [--ambient-project <key>] [--no-ambient-global] [--profile <id> | --task-kind <kind> | --project-scope] [--term <value> ...] [--strict-isolation] [--provider-policy <path>]',
     '  bun src/cli.mjs context-query ... --execute --global-audit-dir <path> [--ticket-package-root <path> --ticket-audit-root <path>] [--review-ledgers-root <path>] [--thread-ref <ref> --thread-audit-root <path>]',
     '  bun src/cli.mjs context-publish --provider <provider> --proposal <json> --runtime-root <path> --event-runtime-root <path> [--ticket-packages-root <path>] [--review-ledgers-root <path>] [--provider-policy <path>] [--execute]',
     '  bun src/cli.mjs progress-publish --provider <provider> --proposal <json> --runtime-root <path> --event-runtime-root <path> [--ticket-packages-root <path>] [--review-ledgers-root <path>] [--provider-policy <path>] [--execute]',
@@ -109,6 +109,8 @@ function parseArgs(argv) {
   const options = { command, provider: 'codex' };
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
+    // Global rules join every query unless this is given.
+    if (argument === '--no-ambient-global') { /** @type {any} */ (options).ambientGlobal = false; continue; }
     if ([
       '--execute', '--recursive', '--include-self', '--project-scope',
       '--strict-isolation', '--require-source-attestation', '--truncate-duplicate-keys'

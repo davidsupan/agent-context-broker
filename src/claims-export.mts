@@ -10,6 +10,7 @@ import { join, resolve } from 'node:path';
 import { scopeRelation, verifiedClaim, verifiedSnapshotFile } from './context-query.mjs';
 import { verifyEventStore } from './event-store.mjs';
 import { policyEntry, scopeReadable } from './provider-policy.mjs';
+import { loadState } from './reconciliation.mjs';
 
 export const EXPORT_SCHEMA_VERSION = 1;
 export const DEFAULT_LIMIT = 200;
@@ -118,6 +119,10 @@ export function exportClaims(options: ExportOptions): ExportResult {
   const now = options.now ?? new Date();
   const root = resolve(options.runtimeRoot);
   const warnings: string[] = [];
+  try {
+    if (!existsSync(join(root, 'state.json'))) throw new Error('Reconciliation state is missing.');
+    loadState(join(root, 'state.json'));
+  } catch (error) { throw new IntegrityError((error as Error).message); }
 
   let head: { headHash?: string } | null = null;
   let eventCount = 0;

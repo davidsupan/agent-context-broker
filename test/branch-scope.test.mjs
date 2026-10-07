@@ -26,8 +26,8 @@ afterEach(() => {
 
 describe('branch-derived ticket scope', () => {
   test('derives a ticket from a conventional feature branch', () => {
-    const cwd = tempRepository('ref: refs/heads/feature/OC-18404-activity-tab');
-    assert.deepEqual(branchTicketScope(cwd), { kind: 'ticket', key: 'OC-18404' });
+    const cwd = tempRepository('ref: refs/heads/feature/OC-4101-activity-tab');
+    assert.deepEqual(branchTicketScope(cwd), { kind: 'ticket', key: 'OC-4101' });
   });
 
   test('refuses a branch that names two different tickets', () => {
@@ -49,9 +49,9 @@ describe('branch-derived ticket scope', () => {
     const previous = process.env.AGENT_CONTEXT_BROKER_TICKET_PROJECTS;
     process.env.AGENT_CONTEXT_BROKER_TICKET_PROJECTS = 'OC,APP';
     try {
-      assert.deepEqual(branchTicketScope(tempRepository('ref: refs/heads/feature/OC-18404-x')),
-        { kind: 'ticket', key: 'OC-18404' });
-      assert.equal(branchTicketScope(tempRepository('ref: refs/heads/feature/ZZ-18404-x')), null);
+      assert.deepEqual(branchTicketScope(tempRepository('ref: refs/heads/feature/OC-4101-x')),
+        { kind: 'ticket', key: 'OC-4101' });
+      assert.equal(branchTicketScope(tempRepository('ref: refs/heads/feature/ZZ-4101-x')), null);
     } finally {
       if (previous === undefined) delete process.env.AGENT_CONTEXT_BROKER_TICKET_PROJECTS;
       else process.env.AGENT_CONTEXT_BROKER_TICKET_PROJECTS = previous;
@@ -64,10 +64,10 @@ describe('branch-derived ticket scope', () => {
   });
 
   test('finds the repository from a nested working directory', () => {
-    const cwd = tempRepository('ref: refs/heads/bugfix/OC-19292-preserve-errors');
+    const cwd = tempRepository('ref: refs/heads/bugfix/OC-4103-preserve-errors');
     const nested = join(cwd, 'src', 'areas', 'assets');
     mkdirSync(nested, { recursive: true });
-    assert.deepEqual(branchTicketScope(nested), { kind: 'ticket', key: 'OC-19292' });
+    assert.deepEqual(branchTicketScope(nested), { kind: 'ticket', key: 'OC-4103' });
   });
 
   test('resolves a worktree whose .git is a gitdir pointer file', () => {
@@ -76,10 +76,10 @@ describe('branch-derived ticket scope', () => {
     const work = join(root, 'worktree');
     mkdirSync(real, { recursive: true });
     mkdirSync(work, { recursive: true });
-    writeFileSync(join(real, 'HEAD'), 'ref: refs/heads/feature/OC-20165-location-stats\n', 'utf8');
+    writeFileSync(join(real, 'HEAD'), 'ref: refs/heads/feature/OC-4102-location-stats\n', 'utf8');
     writeFileSync(join(work, '.git'), `gitdir: ${real}\n`, 'utf8');
     temporaryRoots.push(root);
-    assert.deepEqual(branchTicketScope(work), { kind: 'ticket', key: 'OC-20165' });
+    assert.deepEqual(branchTicketScope(work), { kind: 'ticket', key: 'OC-4102' });
   });
 
   test('returns null for a branch without a ticket key', () => {

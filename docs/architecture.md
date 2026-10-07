@@ -50,6 +50,17 @@ rather than a single exact key.
   a term match, because standing practice is exactly what the narrow scope
   lacks; live peer progress from it needs a term match, because it is another
   agent's current work rather than a rule.
+- **Ambient global rules.** Every query below global scope also reads the
+  global-scope snapshots, because a global rule applies whatever the task is.
+  Their claims skip the term filter and score below every claim that matched a
+  term. `--no-ambient-global` (option `ambientGlobal: false`) leaves them out,
+  and a provider's read rules drop any global scope they do not allow.
+- **Ranking before the snapshot cap.** Related snapshots are ordered by the role
+  of their own scope (the requested scope, then the ambient project, then global
+  rules, then other related scopes, then snapshots related only through their
+  relation keys), then newest first; the per-scope version is only a tie-break,
+  because versions of different scopes do not compare. Context refresh ranks
+  its snapshots newest first for the same reason.
 - Relation expansion is enrichment, never a gate. A missing or unreadable ledger
   removes related scopes but never the primary one, and a snapshot must still
   carry a relation the query accepts before it is verified and read.

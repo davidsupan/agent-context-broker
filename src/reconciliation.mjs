@@ -11,7 +11,7 @@ import {
   unlinkSync,
   writeFileSync
 } from 'node:fs';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve, isAbsolute } from 'node:path';
 
 import { isSourceAttested } from './source-attestation.mts';
 import { appendBrokerEvent } from './event-store.mjs';
@@ -174,7 +174,9 @@ function initialState() {
     revision: 0,
     updatedAt: new Date(0).toISOString(),
     scopes: {},
-    batches: {}
+    batches: {},
+    tombstones: {},
+    pendingWithdrawals: []
   };
 }
 
@@ -184,11 +186,117 @@ export function loadState(path) {
     state.schemaVersion !== 1 ||
     !Number.isSafeInteger(state.revision) ||
     !state.scopes ||
-    !state.batches
+    !state.batches ||
+    (state.tombstones !== undefined && !isRecord(state.tombstones)) ||
+    (state.pendingWithdrawals !== undefined && !Array.isArray(state.pendingWithdrawals))
   ) {
     throw new Error('Unsupported reconciliation state.');
   }
   return state;
+}
+
+/** @param {string} root @param {string} id */
+function manifestPath(root, id) {
+  if (!/^[a-f0-9-]{36}$/u.test(id)) throw new Error('Invalid withdrawal identifier.');
+  return join(root, 'withdrawals', `${id}.manifest.json`);
+}
+
+/** @param {string} root @param {any} entry */
+function manifestFile(root, entry) {
+  if (typeof entry?.path !== 'string' || !entry.path || isAbsolute(entry.path)) throw new Error('Invalid withdrawal path.');
+  return resolve(root, entry.path);
+}
+
+/** Only sweep write directories protected by the reconciliation lock. @param {string} root */
+function sweepWithdrawalTemps(root) {
+  const folders = new Set([root, join(root, 'withdrawals'), join(root, 'snapshots'), join(root, 'outbox', 'pending'),
+    join(root, 'outbox', 'delivered'),
+    join(root, 'review'), join(root, 'withdrawals', 'reinstatements')]);
+  for (const folder of folders) {
+    if (!existsSync(folder)) continue;
+    for (const name of readdirSync(folder)) {
+      if (folder === root && !name.startsWith('.state.json.') && !name.startsWith('.accepted-snapshots.json.')) continue;
+      if (/^\..+\.json\.\d+\.[a-f0-9-]{36}\.tmp$/u.test(name)) unlinkSync(join(folder, name));
+    }
+  }
+}
+
+/** Run only while holding the reconciliation lock. A receipt makes retries harmless. */
+/** @param {string} root */
+export function resumeWithdrawalDeletes(root) {
+  const statePath = join(root, 'state.json');
+  const state = loadState(statePath);
+  sweepWithdrawalTemps(root);
+  for (const id of state.pendingWithdrawals ?? []) {
+    const manifest = readJson(manifestPath(root, id), null);
+    if (!manifest || manifest.withdrawalId !== id || !Array.isArray(manifest.claimFiles) ||
+        !Array.isArray(manifest.reviews) || !Array.isArray(manifest.auditArtifacts)) {
+      throw new Error('Pending withdrawal manifest is missing or invalid.');
+    }
+    const surviving = new Set(Object.values(state.scopes).flatMap(scope =>
+      Object.values(scope.claimIndex).map(item => item.claimId)));
+    for (const entry of manifest.claimFiles) {
+      if (surviving.has(entry.claimId)) continue;
+      const path = manifestFile(root, entry);
+      if (existsSync(path)) {
+        if (hash(readFileSync(path, 'utf8')) !== entry.fileHash) throw new Error('Withdrawal claim file changed.');
+        unlinkSync(path);
+      }
+    }
+    for (const entry of manifest.reviews) {
+      const path = manifestFile(root, entry);
+      if (!existsSync(path)) continue;
+      const review = readJson(path, null);
+      if (review?.scopeKey !== entry.scopeKey || !Array.isArray(review.candidateClaims)) throw new Error('Withdrawal review changed.');
+      const keys = new Set(entry.claimKeyHashes);
+      const keep = review.candidateClaims.filter((/** @type {any} */ candidate) => !keys.has(candidate?.claimKey));
+      if (keep.length !== review.candidateClaims.length && hash(readFileSync(path, 'utf8')) !== entry.fileHash) {
+        throw new Error('Withdrawal review changed.');
+      }
+      if (keep.length !== review.candidateClaims.length) writeJson(path, {
+        ...review, candidateClaims: keep,
+        withdrawnCandidateCount: (review.withdrawnCandidateCount ?? 0) + review.candidateClaims.length - keep.length
+      });
+    }
+    for (const entry of manifest.auditArtifacts) {
+      const path = manifestFile(root, entry);
+      if (existsSync(path)) {
+        if (hash(readFileSync(path, 'utf8')) !== entry.fileHash) throw new Error('Withdrawal audit artifact changed.');
+        unlinkSync(path);
+      }
+    }
+    if (manifest.claimFiles.some((/** @type {any} */ entry) => !surviving.has(entry.claimId) && existsSync(manifestFile(root, entry))) ||
+        manifest.auditArtifacts.some((/** @type {any} */ entry) => existsSync(manifestFile(root, entry)))) throw new Error('Withdrawal cleanup incomplete.');
+    sweepWithdrawalTemps(root);
+    writeJson(join(root, 'withdrawals', `${id}.json`), {
+      schemaVersion: 1, withdrawalId: id, withdrawnAt: manifest.withdrawnAt,
+      reasonHash: manifest.reasonHash, claims: manifest.claims, deletes: manifest.deletes,
+      ambiguousClaimIds: manifest.ambiguousClaimIds
+    });
+    state.pendingWithdrawals = state.pendingWithdrawals.filter((/** @type {string} */ pending) => pending !== id);
+    writeJson(statePath, state);
+  }
+  return state;
+}
+
+/** Explicitly allow future claims for one withdrawn scope/key pair. */
+/** @param {{ runtimeRoot: string; scopeKey: string; claimKeyHash: string; execute: boolean }} options */
+export async function reinstateClaim({ runtimeRoot, scopeKey: key, claimKeyHash, execute }) {
+  if (execute !== true || typeof key !== 'string' || !HASH.test(claimKeyHash ?? '')) throw new Error('Reinstatement requires execute and a scope/key hash.');
+  const root = resolve(runtimeRoot);
+  return withLock(join(root, 'state.lock'), DEFAULTS, async () => {
+    const state = resumeWithdrawalDeletes(root);
+    const tombstone = state.tombstones?.[key]?.[claimKeyHash];
+    if (!tombstone) throw new Error('Tombstone not found.');
+    delete state.tombstones[key][claimKeyHash];
+    if (Object.keys(state.tombstones[key]).length === 0) delete state.tombstones[key];
+    state.revision += 1;
+    state.updatedAt = new Date().toISOString();
+    writeJson(join(root, 'state.json'), state);
+    const receipt = { schemaVersion: 1, scopeKey: key, claimKeyHash, withdrawalId: tombstone.withdrawalId, at: state.updatedAt };
+    writeJson(join(root, 'withdrawals', 'reinstatements', `${randomUUID()}.json`), receipt);
+    return receipt;
+  });
 }
 
 export function currentScopeContext(inputOptions = {}) {
@@ -425,6 +533,7 @@ function analyze(batch, state, options) {
   const accepted = [];
   const duplicates = [];
   const claims = Array.isArray(batch?.claims) ? batch.claims : [];
+  const tombstones = key ? state.tombstones?.[key] ?? {} : {};
   if (options.requireSourceAttestation) {
     if (!options.attestationRuntimeRoot) {
       issues.push(issue('source-attestation-root-missing', 'blocked'));
@@ -449,6 +558,10 @@ function analyze(batch, state, options) {
   }
   for (const claim of claims) {
     if (typeof claim?.claimKey !== 'string') continue;
+    if (tombstones[hash(claim.claimKey)]) {
+      issues.push(issue('withdrawn', 'blocked', claim.claimKey));
+      continue;
+    }
     const previous = currentClaims[claim.claimKey];
     const valueHash = hash(stableJson(claim.value));
     const expectedCurrentClaimId = claim.expectedCurrentClaimId;
@@ -477,6 +590,8 @@ function analyze(batch, state, options) {
     issues,
     accepted,
     duplicates,
+    withdrawnKeys: new Set(claims.filter((/** @type {any} */ claim) => typeof claim?.claimKey === 'string' && tombstones[hash(claim.claimKey)])
+      .map((/** @type {any} */ claim) => hash(claim.claimKey))),
     state: dispositionFor(issues)
   };
 }
@@ -705,8 +820,8 @@ function persistReview(root, batch, result, analysis) {
     issues: result.issues,
     candidateClaims: containsUnsafe
       ? []
-      : claims.map(reviewClaim),
-    payloadSuppressed: containsUnsafe
+      : claims.filter((/** @type {any} */ claim) => !analysis.withdrawnKeys.has(hash(claim?.claimKey ?? 'invalid'))).map(reviewClaim),
+    payloadSuppressed: containsUnsafe || analysis.withdrawnKeys.size > 0
   };
   writeJson(join(root, 'review', `${review.reviewId}.json`), review);
 }
@@ -752,12 +867,14 @@ export async function reconcileClaimBatch(inputOptions) {
   const statePath = join(root, 'state.json');
 
   return withLock(join(root, 'state.lock'), options, async () => {
-    const state = loadState(statePath);
+    const state = resumeWithdrawalDeletes(root);
     synchronizeRegistry(root, state);
     await deliverCommittedOutbox(root, state, options.eventRuntimeRoot ?? root);
     const batchKey = hash(`batch:${options.batch?.batchId ?? 'invalid'}`);
     if (state.batches[batchKey]) {
-      return { ...state.batches[batchKey], idempotentReplay: true };
+      const replay = state.batches[batchKey];
+      const historical = state.historicalBatches?.[batchKey] === true;
+      return { ...replay, idempotentReplay: true, ...(historical ? { historical: true } : {}) };
     }
 
     const now = options.now ? new Date(options.now) : new Date();
