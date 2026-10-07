@@ -80,6 +80,21 @@ describe('claims-withdraw', () => {
     assert.equal(withdrawn[0].subjectRef, `acb://claim/${v2}`);
   });
 
+  test('unlinked earlier versions and truncated renders are deleted too', async () => {
+    const h = home();
+    await accept(h, { claimKey: 'rule.baselines', value: 'Visual baselines are deferred to a dedicated umbrella ticket after the page settles', observedAt: '2026-10-01T09:00:00.000Z' });
+    const id = current(h)[0].claimId;
+    // An older stored version of the same key that no supersedes link reaches, as a replaced snapshot leaves it.
+    const stored = JSON.parse(readFileSync(join(h.runtime, 'claims', `${id}.json`), 'utf8'));
+    const orphanId = 'f'.repeat(64);
+    writeFileSync(join(h.runtime, 'claims', `${orphanId}.json`), JSON.stringify({ ...stored, claimId: orphanId, value: 'Visual baselines are deferred (older wording)', valueHash: 'e'.repeat(64) }));
+    mkdirSync(h.audit, { recursive: true });
+    writeFileSync(join(h.audit, 'truncated.json'), JSON.stringify({ payload: { text: '- portal decides: Visual baselines are deferred to a dedicated umbrella…' } }));
+    await withdrawClaims({ runtimeRoot: h.runtime, eventRuntimeRoot: h.events, claimIds: [id], reason: 'stale', auditRoots: [h.audit], execute: true });
+    assert.ok(!existsSync(join(h.runtime, 'claims', `${orphanId}.json`)), 'unlinked version of the key deleted');
+    assert.ok(!existsSync(join(h.audit, 'truncated.json')), 'truncated render deleted');
+  });
+
   test('withdrawing the last claim of a scope removes the scope; an unknown id is refused', async () => {
     const h = home();
     await accept(h, { claimKey: 'only.one', value: 'the only accepted claim', observedAt: '2026-10-01T09:00:00.000Z' });

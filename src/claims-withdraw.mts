@@ -65,6 +65,27 @@ function versionChain(root: string, claimId: string): StoredClaim[] {
 }
 
 const valueText = (value: unknown) => (typeof value === 'string' ? value : stableJson(value));
+const squash = (text: string) => text.replace(/\s+/gu, ' ').trim().toLowerCase();
+const PROBE_CHARS = 48;
+
+/** The text that identifies a value in rendered output: its first 48 characters, whitespace collapsed. */
+export function probeOf(value: unknown): string | null {
+  const text = squash(valueText(value));
+  return text.length >= MIN_VALUE_TEXT ? text.slice(0, PROBE_CHARS) : null;
+}
+
+/** Whether any string inside a parsed JSON artifact renders one of the values (truncated renders included). */
+export function rendersValue(json: unknown, probes: readonly string[]): boolean {
+  if (!probes.length) return false;
+  const stack: unknown[] = [json];
+  while (stack.length) {
+    const item = stack.pop();
+    if (typeof item === 'string') { const text = squash(item); if (probes.some(p => text.includes(p))) return true; }
+    else if (Array.isArray(item)) stack.push(...item);
+    else if (item && typeof item === 'object') stack.push(...Object.values(item));
+  }
+  return false;
+}
 
 function jsonFiles(dir: string): string[] {
   if (!existsSync(dir)) return [];
@@ -92,10 +113,18 @@ function analyse(root: string, state: State, options: WithdrawOptions) {
   // A version still current in another scope is kept (the same content accepted twice).
   const currentElsewhere = new Set(Object.values(state.scopes).flatMap(entry => Object.values(entry.claimIndex).map(item => item.claimId)));
   for (const t of targets) currentElsewhere.delete(t.claimId);
-  const deleteIds = new Set(targets.flatMap(t => t.chain.map(c => c.claimId)).filter(id => !currentElsewhere.has(id)));
   const valueHashes = new Set(targets.flatMap(t => t.chain.map(c => c.valueHash)));
-  const keyHashes = new Set(targets.map(t => hash(t.claimKey)));
-  const texts = [...new Set(targets.flatMap(t => t.chain.map(c => valueText(c.value))).filter(text => text.length >= MIN_VALUE_TEXT))];
+  const keys = new Set(targets.map(t => t.claimKey));
+  const keyHashes = new Set([...keys].map(key => hash(key)));
+  // Earlier versions are not always linked by supersedes (a batch that replaced a scope's snapshot leaves them
+  // unlinked), so every stored claim that is current nowhere and carries a withdrawn key or value goes as well.
+  const deleteIds = new Set(targets.flatMap(t => t.chain.map(c => c.claimId)));
+  for (const path of jsonFiles(join(root, 'claims'))) {
+    const claim = readJson(path, null) as StoredClaim | null;
+    if (claim && HASH.test(claim.claimId ?? '') && (keys.has(claim.claimKey) || valueHashes.has(claim.valueHash))) deleteIds.add(claim.claimId);
+  }
+  for (const id of currentElsewhere) deleteIds.delete(id);
+  const probes = [...new Set(targets.flatMap(t => t.chain.map(c => probeOf(c.value))).filter((p): p is string => p !== null))];
 
   // Rejected-batch reviews keep candidate claims with their values.
   const reviews: Array<{ path: string; review: Record<string, any>; keep: unknown[]; removed: number }> = [];
@@ -107,7 +136,7 @@ function analyse(root: string, state: State, options: WithdrawOptions) {
   }
   // Audit artifacts that rendered the value into an injected context.
   const artifacts = (options.auditRoots ?? []).flatMap(dir => jsonFiles(dir)).filter(path => {
-    try { const text = readFileSync(path, 'utf8'); return texts.some(value => text.includes(JSON.stringify(value).slice(1, -1))); } catch { return false; }
+    try { return rendersValue(JSON.parse(readFileSync(path, 'utf8')), probes); } catch { return false; }
   });
 
   const removedKeys = new Map<string, Set<string>>();
