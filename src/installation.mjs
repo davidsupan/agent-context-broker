@@ -171,6 +171,16 @@ function assertSafeInputPath(path, name) {
   }
 }
 
+// The runtime path is only executed, never written to, and pinning a stable symlink (a Homebrew or
+// nvm entry) is the point of passing it. It must still resolve to an existing regular file.
+function assertSafeRuntimePath(path) {
+  if (!isAbsolute(path)) throw new Error('RuntimePath must be an absolute path.');
+  if (/[\0\r\n]/u.test(path)) throw new Error('RuntimePath must not contain control characters.');
+  let target;
+  try { target = realpathSync(path); } catch { throw new Error(`RuntimePath does not exist: ${path}`); }
+  if (!lstatSync(target).isFile()) throw new Error(`RuntimePath must resolve to a file: ${path}`);
+}
+
 function walkFiles(root) {
   if (pathKind(root) !== 'directory') throw new Error(`Directory is missing: ${root}`);
   const files = [];
@@ -444,9 +454,9 @@ function normalizeOptions(input = {}) {
     CodexHome: options.codexHome,
     ClaudeHome: options.claudeHome,
     RuntimeHome: options.runtimeHome,
-    RuntimePath: options.runtimePath,
     ...(options.providerPolicy ? { ProviderPolicy: options.providerPolicy } : {})
   })) assertSafeInputPath(path, name);
+  assertSafeRuntimePath(options.runtimePath);
   if (!['install', 'remove', 'rollback', 'adopt'].includes(options.action)) {
     throw new Error(`Unsupported installation action: ${options.action}`);
   }

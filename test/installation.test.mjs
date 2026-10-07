@@ -434,4 +434,14 @@ describe('installation manager', () => {
     assert.equal(broken.runtime.present, false);
     assert.equal(broken.runtime.supported, false);
   });
+
+  test('a runtime path must be absolute and resolve to an existing file', () => {
+    const root = testRoot('runtime-path-checks');
+    const input = options(root);
+    assert.throws(() => manageInstallation({ ...input, runtimePath: join(root, 'missing-node') }), /RuntimePath does not exist/u);
+    mkdirSync(join(root, 'a-directory'), { recursive: true });
+    assert.throws(() => manageInstallation({ ...input, runtimePath: join(root, 'a-directory') }), /RuntimePath must resolve to a file/u);
+    // An explicit, existing, non-link path is recorded as given.
+    assert.equal(manageInstallation({ ...input, runtimePath: process.execPath }).runtime.path, resolve(process.execPath));
+  });
 });
