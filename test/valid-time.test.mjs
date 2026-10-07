@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-import { lifecycleOutboxEntry, observedAtFor } from '../src/lifecycle-events.mts';
+import { lifecycleOutboxEntry, observedAtFor, persistLifecycleOutbox } from '../src/lifecycle-events.mts';
 
 const RUN_TIME = '2026-09-14T15:00:00.000Z';
 
@@ -93,5 +93,24 @@ describe('valid time comes from the source, not the run', () => {
 
     const observed = entry.attestations.map((attestation) => attestation.observedAt);
     assert.deepEqual(observed, ['2026-05-28T10:08:29.993Z', '2026-09-14T09:00:00.000Z']);
+  });
+});
+
+describe('lifecycle outbox entry', () => {
+  test('a delta whose source is absent from the inventory is refused, not dropped', () => {
+    const known = source();
+    const orphan = { ...delta('9'.repeat(64)), deltaId: '8'.repeat(64) };
+    const writes = [];
+
+    assert.throws(
+      () => persistLifecycleOutbox({
+        inventory: inventory([known]),
+        deltas: [delta(known.sourceId), orphan],
+        lifecycleRuntimeRoot: '.',
+        atomicWriter: (path) => writes.push(path)
+      }),
+      new RegExp(`delta ${'8'.repeat(64)} names a source its inventory does not hold`, 'u')
+    );
+    assert.deepEqual(writes, []);
   });
 });
