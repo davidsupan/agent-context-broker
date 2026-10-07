@@ -14,7 +14,9 @@ import { fileURLToPath } from 'node:url';
 
 // stripTypeScriptTypes is experimental on Node 24 and warns once; the build output is checked below instead.
 const emitWarning = process.emitWarning.bind(process);
-process.emitWarning = (warning, ...rest) => (String(warning).includes('stripTypeScriptTypes') ? undefined : emitWarning(warning, ...rest));
+process.emitWarning = /** @type {typeof process.emitWarning} */ ((warning, ...rest) => {
+  if (!String(warning).includes('stripTypeScriptTypes')) emitWarning(warning, .../** @type {[any]} */ (rest));
+});
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const stage = join(root, 'build', 'package');
