@@ -89,13 +89,18 @@ export function lifecycleOutboxEntry(inventory: LifecycleInventory, deltas: Life
     runId: inventory.runId,
     inventoryHash: sha256(stableJson(inventory)),
     attestations,
-    events: deltas.map((delta) => deltaEvent(
-      inventory.provider,
-      delta,
-      sources.get(delta.sourceId)!,
-      bySource.get(delta.sourceId)!,
-      observedAtFor(sources.get(delta.sourceId), inventory.generatedAt)
-    ))
+    // A delta whose source is not in the inventory has no attestation to point at, so it
+    // cannot become an event. Dropping it would lose it for good, because both callers move
+    // on once the outbox is written; refusing leaves the run to be replayed or inspected.
+    events: deltas.map((delta) => {
+      const source = sources.get(delta.sourceId);
+      const attestation = bySource.get(delta.sourceId);
+      if (!source || !attestation) {
+        throw new Error(`Lifecycle outbox refused run ${inventory.runId}: delta ${delta.deltaId} ` +
+          'names a source its inventory does not hold.');
+      }
+      return deltaEvent(inventory.provider, delta, source, attestation, observedAtFor(source, inventory.generatedAt));
+    })
   };
 }
 
