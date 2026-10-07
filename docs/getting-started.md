@@ -2,26 +2,31 @@
 
 ## Requirements
 
-- Bun `1.4.x`
+- Node `24.2` or newer (Bun `1.4.x` still runs this release)
 - Codex or Claude Code only when installing a provider bridge
 - Windows, Linux, or macOS 13 or newer
 
-PowerShell, Node.js, and npm are not required. The broker has no package
-dependencies, so validation and installation do not run a dependency install.
+PowerShell and npm packages are not required. The broker has no package
+dependencies, so validation and installation do not run a dependency install;
+`npm run` only starts the scripts in `package.json`.
 
-Install Bun using its [official installation instructions](https://bun.sh/docs/installation),
+Install Node from its [official downloads](https://nodejs.org/en/download),
 then verify the runtime before continuing:
 
 ```sh
-bun --version
-bun --revision
+node --version
 ```
+
+The runtime that runs the installer is the runtime the hooks will call, so
+install with the Node you want the agents to use. An existing Bun installation
+keeps working; set `AGENT_CONTEXT_BROKER_RUNTIME=bun` for the POSIX launchers
+to keep choosing Bun where both are installed.
 
 ## Validate the checkout
 
 ```sh
-bun run validate
-bun pm pack --dry-run
+npm run validate
+npm pack --dry-run
 ```
 
 On Linux and macOS, also validate and exercise the native shell entrypoints:
@@ -34,14 +39,14 @@ sh -n scripts/*.sh
 ## Install provider bridges
 
 Installation is plan-only by default. The plan binds the package manifest,
-resolved Bun executable, selected providers, target paths, and current target
+resolved runtime executable, selected providers, target paths, and current target
 hashes. Review it, then pass both exact digests back to the unchanged command:
 
 ```sh
-bun scripts/manage-agent-context-broker-installation.mjs install \
+node scripts/manage-agent-context-broker-installation.mjs install \
   --provider both > install-plan.json
 
-bun scripts/manage-agent-context-broker-installation.mjs install \
+node scripts/manage-agent-context-broker-installation.mjs install \
   --provider both \
   --expected-manifest-digest <manifestDigest-from-install-plan> \
   --expected-plan-digest <planDigest-from-install-plan> \
@@ -55,14 +60,14 @@ options instead.
 The installer copies the broker to `$HOME/.agent-context-broker`, adds only its
 own lifecycle handlers to existing Codex and Claude Code configuration, and
 stores byte-exact backups outside the installation tree. The generated hook
-commands pin the resolved absolute Bun executable and call the provider CLI
+commands pin the resolved absolute runtime executable and call the provider CLI
 without a PowerShell or Node.js wrapper.
 
 Restart the installed providers after activation, review their hook
 configuration, then inspect the installation:
 
 ```sh
-bun "$HOME/.agent-context-broker/tool/scripts/test-agent-context-broker-installation.mjs"
+node "$HOME/.agent-context-broker/tool/scripts/test-agent-context-broker-installation.mjs"
 ```
 
 The installed `tool/` directory includes the complete command-script set,
@@ -74,12 +79,12 @@ schedule corpus processing, or promote extracted claims.
 Check the installed package contents separately from provider-hook verification:
 
 ```sh
-bun "$HOME/.agent-context-broker/tool/scripts/check-package.mjs" --installed
+node "$HOME/.agent-context-broker/tool/scripts/check-package.mjs" --installed
 ```
 
-Equivalently, run `bun run check:installed` from the installed `tool/` directory.
+Equivalently, run `npm run check:installed` from the installed `tool/` directory.
 This mode checks the runtime payload without requiring checkout-only `.github/`
-files, `.editorconfig`, or the project site. Keep using `bun run validate` in the
+files, `.editorconfig`, or the project site. Keep using `npm run validate` in the
 checkout for repository validation. For a custom installation root, substitute
 that root in both verification commands.
 
@@ -138,7 +143,7 @@ reports:
 
 ```sh
 HOME_DIR="${AGENT_CONTEXT_BROKER_HOME:-<platform default above>}"
-bun src/cli.mjs doctor --runtime-root "$HOME_DIR/runtime/reconciliation" \
+node src/cli.mjs doctor --runtime-root "$HOME_DIR/runtime/reconciliation" \
   --event-runtime-root "$HOME_DIR/runtime/events"
 ```
 
@@ -150,7 +155,7 @@ root.
 Commands plan changes by default:
 
 ```sh
-bun scripts/agent-context.mjs query \
+node scripts/agent-context.mjs query \
   --provider codex \
   --profile custom-project \
   --project-scope \
@@ -168,6 +173,7 @@ implicit project routing.
 | Variable | Purpose |
 |---|---|
 | `AGENT_CONTEXT_BROKER_HOME` | Private runtime root |
+| `AGENT_CONTEXT_BROKER_RUNTIME` | `node` or `bun`: which runtime the POSIX launchers (`scripts/*.sh`) use; the default is Node when it is installed |
 | `AGENT_CONTEXT_BROKER_DEFAULT_PROJECT` | Explicit lifecycle fallback project, and the ambient project a ticket or review query also reads |
 | `AGENT_CONTEXT_BROKER_STRICT_ISOLATION=1` | Disable broker reads and writes in provider hooks |
 | `AGENT_CONTEXT_BROKER_CODEX_TRANSCRIPT_ROOTS` | Extra allowed Codex transcript roots |
@@ -198,10 +204,10 @@ directly bypasses it, so any other wrapper must make the same check itself.
 time from each source's newest record and transaction time from the run:
 
 ```sh
-bun src/cli.mjs migrate-events --ledger-dir <ledger-dir> \
+node src/cli.mjs migrate-events --ledger-dir <ledger-dir> \
   --runtime-root "$AGENT_CONTEXT_BROKER_HOME/runtime" \
   --event-runtime-root "$AGENT_CONTEXT_BROKER_HOME/runtime/events" --execute
-bun scripts/audit-ingested-events.mjs "$AGENT_CONTEXT_BROKER_HOME/runtime/events"
+node scripts/audit-ingested-events.mjs "$AGENT_CONTEXT_BROKER_HOME/runtime/events"
 ```
 
 Point it at the runtime the agents use (see above); a backfill into a runtime
@@ -213,12 +219,12 @@ These scripts operate on provider transcript directories, not on the broker, and
 never delete anything themselves:
 
 ```sh
-bun scripts/archive-corpus.mjs --source <transcripts> --archive <archive> --execute
-bun scripts/verify-archive.mjs --archive <archive> --source <transcripts> --full
-bun scripts/prune-archived-corpus.mjs --source <transcripts> --archive <archive> \
+node scripts/archive-corpus.mjs --source <transcripts> --archive <archive> --execute
+node scripts/verify-archive.mjs --archive <archive> --source <transcripts> --full
+node scripts/prune-archived-corpus.mjs --source <transcripts> --archive <archive> \
   --quarantine <quarantine> --ledger <ledger-path-outside-quarantine> \
   --keep-days 14 --execute
-bun scripts/prune-archived-corpus.mjs ... --ledger <ledger-path> --restore --execute
+node scripts/prune-archived-corpus.mjs ... --ledger <ledger-path> --restore --execute
 ```
 
 `verify-archive` exits non-zero when any archived file cannot be restored, when
@@ -240,9 +246,9 @@ expected handler exactly once; a handler with a different command is refused,
 not approximated:
 
 ```sh
-bun scripts/manage-agent-context-broker-installation.mjs adopt \
+node scripts/manage-agent-context-broker-installation.mjs adopt \
   --provider <provider> --runtime-home <runtime-home> > adopt-plan.json
-bun scripts/manage-agent-context-broker-installation.mjs adopt \
+node scripts/manage-agent-context-broker-installation.mjs adopt \
   --provider <provider> --runtime-home <runtime-home> \
   --expected-manifest-digest <manifestDigest> --expected-plan-digest <planDigest> --execute
 ```
@@ -255,16 +261,16 @@ each with its own digests:
 
 ```sh
 # 1. remove the managed files and handlers (refuses if a managed target drifted)
-bun scripts/manage-agent-context-broker-installation.mjs remove \
+node scripts/manage-agent-context-broker-installation.mjs remove \
   --runtime-home <runtime-home> > remove-plan.json
-bun scripts/manage-agent-context-broker-installation.mjs remove \
+node scripts/manage-agent-context-broker-installation.mjs remove \
   --runtime-home <runtime-home> \
   --expected-plan-digest <planDigest-from-remove-plan> --execute
 
 # 2. install the new package
-bun scripts/manage-agent-context-broker-installation.mjs install \
+node scripts/manage-agent-context-broker-installation.mjs install \
   --provider <provider> --runtime-home <runtime-home> > install-plan.json
-bun scripts/manage-agent-context-broker-installation.mjs install \
+node scripts/manage-agent-context-broker-installation.mjs install \
   --provider <provider> --runtime-home <runtime-home> \
   --expected-manifest-digest <manifestDigest> --expected-plan-digest <planDigest> --execute
 ```
@@ -282,10 +288,10 @@ Removal is also plan-only. It deletes managed files and handlers while
 preserving unrelated configuration changes made after installation:
 
 ```sh
-bun scripts/manage-agent-context-broker-installation.mjs remove \
+node scripts/manage-agent-context-broker-installation.mjs remove \
   --runtime-home <runtime-home> > remove-plan.json
 
-bun scripts/manage-agent-context-broker-installation.mjs remove \
+node scripts/manage-agent-context-broker-installation.mjs remove \
   --runtime-home <runtime-home> \
   --expected-plan-digest <planDigest-from-remove-plan> \
   --execute

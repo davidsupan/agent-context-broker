@@ -4,7 +4,7 @@ Agent Context Broker is a local-first, provider-neutral open-source beta for sha
 
 The repository contains a provider-neutral core, schemas, and optional provider bridges. Its current adapters are for Claude Code and Codex; Claude Code is the operational provider, and the Codex adapter is retained for parity (see [Providers](#providers)).
 
-> **Beta:** `0.11.0-beta.3` is the current source version. The API and storage contracts can change while the project is being evaluated.
+> **Beta:** `0.12.0-beta.1` is the current source version. The API and storage contracts can change while the project is being evaluated.
 
 Visit the [Agent Context Broker project site](https://davidsupan.github.io/agent-context-broker/) for a visual introduction, or continue below for the complete technical overview.
 
@@ -43,10 +43,10 @@ Other providers are not advertised as supported by this beta. A new provider nee
 
 ### Runtime and platform notes
 
-- Bun `1.4.x` is the only runtime dependency.
+- Node `24.2` or newer is the only runtime dependency. Bun `1.4.x` still runs this release and is dropped in the next minor.
 - Windows, Linux, and macOS 13 or newer are supported.
-- macOS supports Apple Silicon and Intel hardware supported by Bun 1.4.
-- PowerShell and Node.js are not required.
+- macOS supports Apple Silicon and Intel hardware supported by Node 24.
+- PowerShell and npm packages are not required; `npm` is used only as the script runner.
 
 No package installation is required for the broker itself.
 
@@ -57,21 +57,21 @@ Clone the repository and validate the checkout:
 ```sh
 git clone https://github.com/davidsupan/agent-context-broker.git
 cd agent-context-broker
-bun run validate
-bun pm pack --dry-run
+npm run validate
+npm pack --dry-run
 ```
 
-These commands check the Bun sources, schemas, fixtures, and package files. They do not read provider history. Start with [`docs/getting-started.md`](docs/getting-started.md), then review [`docs/security-model.md`](docs/security-model.md) before enabling provider hooks.
+These commands check the sources, schemas, fixtures, and package files. They do not read provider history. Start with [`docs/getting-started.md`](docs/getting-started.md), then review [`docs/security-model.md`](docs/security-model.md) before enabling provider hooks.
 
 ## Install
 
 Installation is plan-only by default. Review the generated target list, then activate that exact source manifest and target-state plan:
 
 ```sh
-bun scripts/manage-agent-context-broker-installation.mjs install \
+node scripts/manage-agent-context-broker-installation.mjs install \
   --provider both > install-plan.json
 
-bun scripts/manage-agent-context-broker-installation.mjs install \
+node scripts/manage-agent-context-broker-installation.mjs install \
   --provider both \
   --expected-manifest-digest <manifestDigest-from-plan> \
   --expected-plan-digest <planDigest-from-plan> \
@@ -80,7 +80,7 @@ bun scripts/manage-agent-context-broker-installation.mjs install \
 
 The installer preserves existing Codex and Claude Code lifecycle handlers, writes byte-exact backups, and copies a verifier and uninstaller into the managed installation. Removal and rollback are also plan-bound; see the [getting started guide](docs/getting-started.md) for the complete flow.
 
-The managed tool payload includes the complete `scripts/` directory, documentation, and license files. Corpus archive, verification, pruning, and handoff-candidate commands are available from the installed tool, not only from a checkout. Installing them does not run corpus processing or accept extracted claims. Use `bun run check:installed` from the installed `tool/` directory to check its package contents; repository CI and the project site remain outside that payload.
+The managed tool payload includes the complete `scripts/` directory, documentation, and license files. Corpus archive, verification, pruning, and handoff-candidate commands are available from the installed tool, not only from a checkout. Installing them does not run corpus processing or accept extracted claims. Use `npm run check:installed` from the installed `tool/` directory to check its package contents; repository CI and the project site remain outside that payload.
 
 ## Core workflows
 
@@ -89,7 +89,7 @@ The managed tool payload includes the complete `scripts/` directory, documentati
 Use the high-level launcher to route a bounded query to a provider and project scope:
 
 ```sh
-bun scripts/agent-context.mjs query \
+node scripts/agent-context.mjs query \
   --provider claude-code \
   --profile custom-project \
   --project-scope \
@@ -110,7 +110,7 @@ An optional provider policy gives each installed provider its own read and publi
 The lower-level command inventories a bounded provider source. Keep source files private and use the matching provider name:
 
 ```sh
-bun src/cli.mjs inventory \
+node src/cli.mjs inventory \
   --provider claude-code \
   --source <provider-source.jsonl>
 ```
@@ -128,7 +128,7 @@ See [`examples/candidate-claim-batch.json`](examples/candidate-claim-batch.json)
 Use peer progress for bounded updates that another related task may need while work is in flight:
 
 ```sh
-bun scripts/agent-context.mjs progress \
+node scripts/agent-context.mjs progress \
   --provider claude-code \
   --proposal ./examples/peer-progress-proposal.json
 ```
@@ -146,13 +146,13 @@ A query resolves scope as a small relation graph rather than one exact key: a cl
 Ingested history keeps two clocks: `occurredAt` is taken from the source's newest record (valid time), `recordedAt` from the run (transaction time), so old threads never outrank current context. Batched appends verify the tip once and publish one head per batch, which makes ingestion roughly linear in the number of events:
 
 ```sh
-bun src/cli.mjs migrate-events \
+node src/cli.mjs migrate-events \
   --ledger-dir <inventory-ledger-dir> \
   --runtime-root <runtime> \
   --event-runtime-root <runtime>/events \
   --execute
 
-bun scripts/audit-ingested-events.mjs <runtime>/events
+node scripts/audit-ingested-events.mjs <runtime>/events
 ```
 
 The audit reports the valid/transaction time split, lists any event dated ahead of its own write by sequence number, and flags payloads containing long non-hash strings. That last check is a heuristic for leaked prose, not a proof that no conversation text or secret is present; the content-safety layer at write time is the actual boundary.
@@ -162,9 +162,9 @@ The audit reports the valid/transaction time split, lists any event dated ahead 
 Provider transcripts grow far faster than the broker does. These scripts are deliberately not adapter functions and never delete anything:
 
 ```sh
-bun scripts/archive-corpus.mjs --source <transcripts> --archive <archive> --execute
-bun scripts/verify-archive.mjs --archive <archive> --source <transcripts> --full
-bun scripts/prune-archived-corpus.mjs --source <transcripts> --archive <archive> \
+node scripts/archive-corpus.mjs --source <transcripts> --archive <archive> --execute
+node scripts/verify-archive.mjs --archive <archive> --source <transcripts> --full
+node scripts/prune-archived-corpus.mjs --source <transcripts> --archive <archive> \
   --quarantine <quarantine> --ledger <ledger-outside-quarantine> --keep-days 14 --execute
 ```
 
@@ -175,9 +175,9 @@ Every archived file carries a per-file round-trip proof; verification re-reads t
 Conclusions extracted from transcripts enter the broker only as review material:
 
 ```sh
-bun scripts/extract-handoff-candidates.mjs --source <transcripts> --provider claude-code \
+node scripts/extract-handoff-candidates.mjs --source <transcripts> --provider claude-code \
   --scope-kind project --scope-key <project> --out proposal.json
-bun scripts/propose-handoff-claims.mjs --proposal proposal.json --runtime-root <runtime>/reconciliation --execute
+node scripts/propose-handoff-claims.mjs --proposal proposal.json --runtime-root <runtime>/reconciliation --execute
 ```
 
 The extractor mines operator turns only — sidechain and tool-result records are excluded structurally — and the submitter forces `agent-handoff` / `unverified` regardless of what the proposal asked for, then fails unless reconciliation held the batch for evidence review. Promotion means resubmitting a claim with evidence the broker can check. See [The model-assisted lane](docs/architecture.md#the-model-assisted-lane).
@@ -191,7 +191,7 @@ Bridge packages live under [`providers/`](providers/). Validate the checkout and
 - [`src/`](src/): provider-neutral inventory, routing, reconciliation, publication, event, and read-model code.
 - [`providers/`](providers/): Codex and Claude Code bridge packages.
 - [`schemas/`](schemas/): JSON Schema contracts for sources, claims, snapshots, events, and progress.
-- [`scripts/`](scripts/): Bun launchers, guarded installation and removal, POSIX helpers, package validation, corpus archiving/verification/pruning (`archive-corpus`, `verify-archive`, `prune-archived-corpus`), the model-assisted lane (`extract-handoff-candidates`, `propose-handoff-claims`), and the ingestion audit (`audit-ingested-events`).
+- [`scripts/`](scripts/): launchers, guarded installation and removal, POSIX helpers, package validation, corpus archiving/verification/pruning (`archive-corpus`, `verify-archive`, `prune-archived-corpus`), the model-assisted lane (`extract-handoff-candidates`, `propose-handoff-claims`), and the ingestion audit (`audit-ingested-events`).
 - [`site/`](site/): the dependency-free static source for the GitHub Pages project site.
 - [`docs/`](docs/): getting started, architecture, security, release, and repository-maintenance guidance.
 
@@ -205,7 +205,7 @@ Bridge packages live under [`providers/`](providers/). Validate the checkout and
 
 ## Beta status
 
-This is an early public beta. The current source version is `0.11.0-beta.3`; APIs, storage formats, provider bridges, and platform coverage are still subject to change. The repository is suitable for evaluation and focused integration work, but integrations should review the contracts and security behavior before relying on them.
+This is an early public beta. The current source version is `0.12.0-beta.1`; APIs, storage formats, provider bridges, and platform coverage are still subject to change. The repository is suitable for evaluation and focused integration work, but integrations should review the contracts and security behavior before relying on them.
 
 Security fixes are supported on the latest published revision only. See [`SECURITY.md`](SECURITY.md) for responsible disclosure guidance.
 

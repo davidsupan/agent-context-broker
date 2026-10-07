@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 // Moves archived originals into a quarantine directory, reversibly.
 //
 // Pruning is a rename, not a delete. Every moved file is recorded in a ledger with the

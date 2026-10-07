@@ -14,7 +14,7 @@ Use the [GitHub issue tracker](https://github.com/davidsupan/agent-context-broke
 - design discussions about provider-neutral contracts or workflows; and
 - focused reproductions with the smallest useful fixture or test case.
 
-When possible, include the package version or commit, provider, operating system, Bun version, minimal reproduction steps, and the behavior you expected. Redact sensitive values and prefer synthetic fixtures.
+When possible, include the package version or commit, provider, operating system, Node (or Bun) version, minimal reproduction steps, and the behavior you expected. Redact sensitive values and prefer synthetic fixtures.
 
 ## Pull request policy
 
@@ -40,8 +40,8 @@ and agree that it is licensed under the repository's Apache License 2.0.
 Run both package validation commands before opening a PR:
 
 ```sh
-bun run validate
-bun pm pack --dry-run
+npm run validate
+npm pack --dry-run
 ```
 
 ## Keep data safe

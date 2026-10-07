@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 // Builds a deterministic, token-free catalog of agent transcript sessions.
 //
 // This is the first, cheap layer of historical distillation: before a single model token

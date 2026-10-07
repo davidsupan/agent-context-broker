@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 // Submits model-extracted conclusions into the review lane.
 //
 // This is the one place a language model's output reaches the broker, and it is

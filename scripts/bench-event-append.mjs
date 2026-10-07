@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 // Measures what one append costs as the store grows. appendBrokerEvent verifies the
 // whole chain before writing, so building a store of N events is quadratic. This is
 // the number that decides whether backfilling thousands of events is feasible.

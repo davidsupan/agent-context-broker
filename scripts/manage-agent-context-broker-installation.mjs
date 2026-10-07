@@ -1,9 +1,10 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { manageInstallation } from '../src/installation.mjs';
+import { isMainModule } from '../src/runtime.mjs';
 
 const VALUE_OPTIONS = Object.freeze({
   '--provider': 'provider',
@@ -46,7 +47,7 @@ export function parseInstallationArguments(argv) {
   return options;
 }
 
-if (import.meta.main) {
+if (isMainModule(import.meta.url)) {
   try {
     const result = manageInstallation(parseInstallationArguments(process.argv.slice(2)));
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);

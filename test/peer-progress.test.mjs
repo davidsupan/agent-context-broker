@@ -234,7 +234,7 @@ describe('peer progress', () => {
     assert.equal(related.progress[0].provider, 'codex');
   });
 
-  test('shared Bun wrapper forwards the caller descriptor to the stored artifact', async () => {
+  test('shared wrapper forwards the caller descriptor to the stored artifact', async () => {
     // The launcher is what agents actually call, so a flag documented on it has to be
     // accepted by it, not only by the core CLI underneath.
     const home = root('wrapper-agent-home');
@@ -333,7 +333,7 @@ describe('peer progress', () => {
     assert.match(inside.stderr, /Provider policy denies publication/u);
   });
 
-  test('shared Bun wrapper exposes progress publication without requiring a skill command', async () => {
+  test('shared wrapper exposes progress publication without requiring a skill command', async () => {
     const runtimeRoot = root('wrapper-runtime');
     const eventRuntimeRoot = root('wrapper-events');
     const token = await source(eventRuntimeRoot, 'codex', 'wrapper');

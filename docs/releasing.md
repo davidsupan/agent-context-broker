@@ -8,9 +8,9 @@ second hand-maintained changelog.
 1. Start from an exact, green `main` commit.
 2. Update the root and provider package versions together.
 3. Update version references in documentation, examples, and `site/index.html`.
-4. Run `bun run validate` on a supported platform.
-5. Run `bun pm pack --dry-run` and inspect the allowlisted package contents.
-6. Create the package archive with `bun pm pack` and record its SHA-256 digest.
+4. Run `npm run validate` on a supported platform.
+5. Run `npm pack --dry-run` and inspect the allowlisted package contents.
+6. Create the package archive with `npm pack` and record its SHA-256 digest.
 7. Tag the exact commit as `v<package-version>` and create a GitHub Release.
    Generate the initial notes from `.github/release.yml`, then review them for
    compatibility, security, and migration details before publishing. A release
@@ -40,7 +40,7 @@ The managed installation includes the complete `scripts/` directory,
 documentation, and license files. Validate that installed payload as well as
 the checkout: the installation tests exercise an isolated installation and run
 `scripts/check-package.mjs --installed` against its copied tool directory.
-The same check is available as `bun run check:installed` from that directory.
+The same check is available as `npm run check:installed` from that directory.
 It does not require repository CI configuration or the project site, and does
 not replace provider-hook verification.
 

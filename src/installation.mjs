@@ -21,6 +21,7 @@ import { fileURLToPath } from 'node:url';
 
 import { defaultRuntimeHome } from './platform-paths.mjs';
 import { POLICY_FILE, parseProviderPolicy } from './provider-policy.mjs';
+import { assertSupportedRuntime, runtimeInfo } from './runtime.mjs';
 
 export const MINIMUM_BUN_VERSION = '1.4.0';
 
@@ -132,6 +133,7 @@ function versionAtLeast(actual, minimum) {
   return true;
 }
 
+/** Kept for callers that pinned Bun; new code uses assertSupportedRuntime from runtime.mjs. */
 export function assertSupportedBun(version = globalThis.Bun?.version) {
   const major = version ? normalizedVersionParts(version)[0] : null;
   if (!version || major !== 1 || !versionAtLeast(version, MINIMUM_BUN_VERSION)) {
@@ -327,8 +329,9 @@ function commandQuote(value, platform) {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
-export function buildLifecycleCommand({ bunPath, cliPath, runtimeHome, platform = process.platform }) {
-  return [bunPath, cliPath, '--runtime-home', runtimeHome]
+export function buildLifecycleCommand({ runtimePath, bunPath, cliPath, runtimeHome, platform = process.platform }) {
+  // `bunPath` is the name callers used while Bun was the only runtime.
+  return [runtimePath ?? bunPath, cliPath, '--runtime-home', runtimeHome]
     .map((value) => commandQuote(value, platform))
     .join(' ');
 }
@@ -423,7 +426,8 @@ function normalizeOptions(input = {}) {
     codexHome: resolve(input.codexHome ?? join(home, '.codex')),
     claudeHome: resolve(input.claudeHome ?? join(home, '.claude')),
     runtimeHome: resolve(input.runtimeHome ?? defaultRuntimeHome({ home, platform, env: input.env })),
-    bunPath: realpathSync(resolve(input.bunPath ?? process.execPath)),
+    // The runtime that runs the installer is the one the hooks will call: Node or Bun.
+    runtimePath: realpathSync(resolve(input.runtimePath ?? input.bunPath ?? process.execPath)),
     expectedManifestDigest: input.expectedManifestDigest,
     expectedPlanDigest: input.expectedPlanDigest,
     providerPolicy: input.providerPolicy ? resolve(input.providerPolicy) : undefined,
@@ -436,7 +440,7 @@ function normalizeOptions(input = {}) {
     CodexHome: options.codexHome,
     ClaudeHome: options.claudeHome,
     RuntimeHome: options.runtimeHome,
-    BunPath: options.bunPath,
+    RuntimePath: options.runtimePath,
     ...(options.providerPolicy ? { ProviderPolicy: options.providerPolicy } : {})
   })) assertSafeInputPath(path, name);
   if (!['install', 'remove', 'rollback', 'adopt'].includes(options.action)) {
@@ -488,7 +492,7 @@ function configTargets(options) {
     const path = join(homes[provider], definition.configName);
     const cliPath = join(options.installRoot, 'tool', ...definition.cliPath);
     const command = buildLifecycleCommand({
-      bunPath: options.bunPath,
+      runtimePath: options.runtimePath,
       cliPath,
       runtimeHome: options.runtimeHome,
       platform: options.platform
@@ -577,8 +581,7 @@ function install(options) {
     action: 'Install',
     version,
     provider: String(options.provider).toLowerCase(),
-    bunVersion: assertSupportedBun(),
-    bunPath: options.bunPath,
+    runtime: { ...assertSupportedRuntime(), path: options.runtimePath },
     manifestDigest,
     targets: targetPlan
   };
@@ -637,7 +640,7 @@ function install(options) {
       package: 'agent-context-broker',
       version,
       provider: String(options.provider).toLowerCase(),
-      runtime: { name: 'bun', version: globalThis.Bun.version, path: options.bunPath },
+      runtime: { ...runtimeInfo(), path: options.runtimePath },
       installedAt: new Date().toISOString(),
       installRoot: options.installRoot,
       runtimeHome: options.runtimeHome,
@@ -809,7 +812,7 @@ function adopt(options) {
     const definition = PROVIDER_CONFIG[provider];
     const path = join(homes[provider], definition.configName);
     const command = buildLifecycleCommand({
-      bunPath: options.bunPath,
+      runtimePath: options.runtimePath,
       cliPath: join(toolPath, ...definition.cliPath),
       runtimeHome: options.runtimeHome,
       platform: options.platform
@@ -833,8 +836,7 @@ function adopt(options) {
     action: 'Adopt',
     version,
     provider: String(options.provider).toLowerCase(),
-    bunVersion: assertSupportedBun(),
-    bunPath: options.bunPath,
+    runtime: { ...assertSupportedRuntime(), path: options.runtimePath },
     manifestDigest,
     targets: targetPlan
   };
@@ -876,7 +878,7 @@ function adopt(options) {
       package: 'agent-context-broker',
       version,
       provider: String(options.provider).toLowerCase(),
-      runtime: { name: 'bun', version: globalThis.Bun.version, path: options.bunPath },
+      runtime: { ...runtimeInfo(), path: options.runtimePath },
       installedAt: new Date().toISOString(),
       adopted: true,
       installRoot: options.installRoot,
@@ -895,7 +897,7 @@ function adopt(options) {
 
 export function manageInstallation(input = {}) {
   const options = normalizeOptions(input);
-  assertSupportedBun();
+  assertSupportedRuntime();
   if (options.action === 'install') return install(options);
   if (options.action === 'adopt') return adopt(options);
   return removeOrRollback(options);

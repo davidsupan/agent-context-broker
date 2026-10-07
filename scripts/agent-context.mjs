@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 
 import {
   closeSync,
@@ -15,6 +15,8 @@ import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { defaultRuntimeHome } from '../src/platform-paths.mjs';
+import { spawnSync } from 'node:child_process';
+import { isMainModule, sleepSync } from '../src/runtime.mjs';
 
 const COMMANDS = Object.freeze({
   query: 'context-query',
@@ -107,7 +109,7 @@ function appendLedgerRow(path, row) {
         continue;
       }
       if (Date.now() >= deadline) throw new Error('Context ledger is busy.');
-      Bun.sleepSync(50);
+      sleepSync(50);
     }
   }
   try {
@@ -145,17 +147,17 @@ function pushAgentArguments(args, options) {
 }
 
 function runCore(toolRoot, args) {
-  const result = Bun.spawnSync({
-    cmd: [process.execPath, join(toolRoot, 'src', 'cli.mjs'), ...args],
-    stdin: 'inherit',
-    stdout: 'pipe',
-    stderr: 'pipe'
+  const result = spawnSync(process.execPath, [join(toolRoot, 'src', 'cli.mjs'), ...args], {
+    stdio: ['inherit', 'pipe', 'pipe'],
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024
   });
-  if (result.exitCode !== 0) {
-    const message = result.stderr.toString('utf8').trim();
-    throw new Error(message || `Agent Context Broker exited with code ${result.exitCode}.`);
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    const message = String(result.stderr ?? '').trim();
+    throw new Error(message || `Agent Context Broker exited with code ${result.status}.`);
   }
-  return result.stdout.toString('utf8');
+  return String(result.stdout ?? '');
 }
 
 function buildCommonRouteArguments(options) {
@@ -311,7 +313,7 @@ export function runAgentContext(argv) {
   return output;
 }
 
-if (import.meta.main) {
+if (isMainModule(import.meta.url)) {
   try {
     process.stdout.write(runAgentContext(process.argv.slice(2)));
   } catch (error) {

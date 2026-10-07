@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 // Catalogs the material that was already written for handoff: ledgers, handoffs, ticket
 // packages, workstream documents and consult outputs across one or more workbenches.
 //

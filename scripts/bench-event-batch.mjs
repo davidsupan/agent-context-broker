@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 // Compares one-at-a-time appends with batched appends at a size that matters for
 // backfill. A batch verifies the tip once, reads the idempotency index once, and
 // publishes one head, so the per-event cost stops depending on the store size.

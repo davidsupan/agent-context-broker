@@ -64,7 +64,7 @@ What was observed, in the order it became known:
   failed every query until it was superseded by a plain revision.
 - Different processes then read different contents at the same pathname. The
   mechanism is **MSIX AppData virtualization**: the packaged desktop agent and
-  every process it spawns — its tools, Bun, and therefore the agents' lifecycle
+  every process it spawns — its tools, the runtime, and therefore the agents' lifecycle
   hooks — have `%LOCALAPPDATA%` writes redirected into the package's
   `Packages\<app>\LocalCache\Local\…` tree, and `doctor` run from such a process
   reports that path as the resolved root. A native, non-elevated shell on the

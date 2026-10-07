@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 // Extracts candidate conclusions from provider transcripts into a Lane B proposal.
 //
 // What this is: a deterministic candidate generator. It finds operator turns that carry
