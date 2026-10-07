@@ -98,6 +98,14 @@ or any other untrusted input. A query already at project scope does not widen.
 Claims of a different project remain unreachable, and term filtering still
 applies to everything the ambient project contributes.
 
+## Ambient global rules
+
+Global-scope snapshots join every query below global scope. Only snapshots the
+operator published at kind global take part, the provider's read rules still
+decide per scope, and the snapshot cap still bounds the total. Their claims are
+admitted without a term match, so keep the global scope for rules that truly
+hold everywhere; anything narrower belongs at a project or workstream.
+
 Claims and live progress differ here, deliberately. A standing claim recorded at
 the project is what a narrow query is missing, so it surfaces without a term
 match. Live progress published against the project is another agent's current

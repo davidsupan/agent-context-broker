@@ -55,4 +55,18 @@ describe('snapshot ranking before the cap', () => {
     assert.ok(result.warnings.includes('accepted-snapshot-limit-reached'), 'the cap applies');
     assert.ok(result.claims.some((claim) => claim.claimKey === 'rule.standing'), 'the requested scope is always selected');
   });
+
+  test('global rules join every query after the project, and a caller or a read rule can leave them out', async () => {
+    const h = home();
+    const project = { kind: 'project', key: 'example-project' };
+    const global = { kind: 'global', key: 'agent-behaviour' };
+    await publish(h, global, [relation('global', global.key)], 'rule.global', 'ask before any irreversible step', '2026-10-01T07:00:00.000Z');
+    await publish(h, project, [relation('project', project.key)], 'rule.project', 'every change goes through review', '2026-10-01T08:00:00.000Z');
+    const ask = (extra = {}) => planContextQuery({ provider: 'claude-code', runtimeRoot: h.runtime, profileId: 'implementation',
+      terms: ['review'], scopeKind: 'project', scopeKey: project.key, ...extra });
+    const withGlobal = await ask();
+    assert.deepEqual(withGlobal.claims.map((claim) => claim.claimKey).sort(), ['rule.global', 'rule.project']);
+    const withoutGlobal = await ask({ ambientGlobal: false });
+    assert.deepEqual(withoutGlobal.claims.map((claim) => claim.claimKey), ['rule.project']);
+  });
 });

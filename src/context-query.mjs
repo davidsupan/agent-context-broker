@@ -299,11 +299,12 @@ export function verifiedSnapshotFile(root, registryEntry) {
   return { ...snapshot, claimIds: snapshot.claimIds.filter((/** @type {string} */ claimId) => allowed.has(claimId)) };
 }
 
-const SNAPSHOT_ROLE_RANK = { primary: 0, 'ambient-project': 1 };
+const SNAPSHOT_ROLE_RANK = { primary: 0, 'ambient-project': 1, 'ambient-global': 2 };
 
 /**
  * Where a related snapshot ranks before the snapshot cap: by its own scope's role in the query (the requested scope,
- * then the ambient project, then any other related scope, then a snapshot related only through its relation keys),
+ * then the ambient project, then global rules, then any other related scope, then a snapshot related only through
+ * its relation keys),
  * then by when it was created. Unreadable snapshots rank last; verification still rejects them if selected.
  * @param {string} root @param {any} entry @param {Map<string, string>} scopeRelations
  */
@@ -314,8 +315,28 @@ function snapshotRank(root, entry, scopeRelations) {
   const scope = snapshot?.scope;
   const own = scope && typeof scope.kind === 'string' && typeof scope.key === 'string'
     ? scopeRelations.get(scopeRelation(scope.kind, scope.key)) : undefined;
-  const role = own === undefined ? 3 : (SNAPSHOT_ROLE_RANK[/** @type {keyof typeof SNAPSHOT_ROLE_RANK} */ (own)] ?? 2);
+  const role = own === undefined ? 4 : (SNAPSHOT_ROLE_RANK[/** @type {keyof typeof SNAPSHOT_ROLE_RANK} */ (own)] ?? 3);
   return { role, createdAt: typeof snapshot?.createdAt === 'string' ? snapshot.createdAt : '' };
+}
+
+/**
+ * Global rules apply everywhere, so the global-scope snapshots of the registry join every query as ambient scopes,
+ * unless the caller turns that off or a provider's read rules do not allow the scope. Their keys are read from the
+ * snapshot files; verification still happens on the selected ones.
+ * @param {string} root @param {any[]} snapshots @param {any} rule
+ */
+function ambientGlobalRelations(root, snapshots, rule) {
+  /** @type {string[]} */
+  const relations = [];
+  for (const entry of snapshots) {
+    if (entry?.state !== 'clean' || !SNAPSHOT_ID.test(String(entry?.snapshotId ?? ''))) continue;
+    let scope = null;
+    try { scope = readJson(join(root, 'snapshots', `${entry.snapshotId}.json`))?.scope ?? null; } catch { continue; }
+    if (scope?.kind !== 'global' || typeof scope.key !== 'string') continue;
+    if (rule?.read && !scopeReadable(rule, { kind: 'global', key: scope.key })) continue;
+    relations.push(scopeRelation('global', scope.key));
+  }
+  return relations;
 }
 
 function verifiedSnapshot(root, registryEntry, profile, options, now) {
@@ -376,7 +397,10 @@ function relevance(claim, snapshot, profile, queryTerms, options) {
   // broad enough that term filtering is what keeps the result usable, and related
   // scopes still require a term match so a parent ticket cannot flood the query.
   const narrowScope = ['ticket', 'merge-request'].includes(options.scopeKind);
-  if (queryTerms.length > 0 && queryMatches === 0 && !(narrowScope && exactScope >= 4)) return -1;
+  // Global rules are ambient: they apply whatever the task is about, so they skip the term filter and rank below
+  // every claim that matched a term.
+  const ambientGlobal = snapshot.scope?.kind === 'global' && options.scopeKind !== 'global';
+  if (queryTerms.length > 0 && queryMatches === 0 && !(narrowScope && exactScope >= 4) && !ambientGlobal) return -1;
   return (queryMatches * 8) + (profileMatches * 2) + exactScope +
     (claim.providers.includes(options.provider) ? 0 : 1);
 }
@@ -637,6 +661,12 @@ async function buildContextQuery(inputOptions = {}) {
   loadState(join(root, 'state.json'));
 
   const scopeRelations = acceptedScopeRelations(options);
+  const { ambientGlobal, scopeKind } = /** @type {any} */ (options);
+  if (ambientGlobal !== false && scopeKind !== 'global') {
+    for (const relationKey of ambientGlobalRelations(root, registry.snapshots, rule)) {
+      if (!scopeRelations.has(relationKey)) scopeRelations.set(relationKey, 'ambient-global');
+    }
+  }
   const scopedOptions = { ...options, scopeRelations };
   if (scopeRelations.size > 1) base.warnings.push('scope-relations-expanded');
   const entries = registry.snapshots
