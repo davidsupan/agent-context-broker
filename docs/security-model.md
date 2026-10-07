@@ -71,7 +71,7 @@ What was observed, in the order it became known:
   same machine saw the unvirtualised directory: a `head.json` committing to the
   foreign four-event genesis and an empty records directory, i.e. a broken store
   that no agent reads. An elevated process reported a junction into an older
-  `…\Ocean\…` tree holding a third, unforked 4,033-event chain. None of these is
+  host application's `…\<host>\…` tree holding a third, unforked 4,033-event chain. None of these is
   "the" store; the one that matters operationally is the one the hooks' process
   kind resolves, and the fix is to bind identity to the resolved path and head
   hash — or to move the runtime home out of the virtualised area altogether.
