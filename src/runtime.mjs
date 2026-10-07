@@ -2,6 +2,9 @@
 // keeps working for one more release. Everything runtime-specific goes through here, so the
 // rest of the code never touches `globalThis.Bun`.
 
+import { spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+
 export const MINIMUM_NODE_VERSION = '24.2.0';
 export const MINIMUM_BUN_VERSION = '1.4.0';
 
@@ -33,6 +36,27 @@ export function assertSupportedRuntime(info = runtimeInfo()) {
   }
   if (info.name === 'node' && atLeast(info.version, MINIMUM_NODE_VERSION)) return info;
   throw new Error(`Agent Context Broker requires Node ${MINIMUM_NODE_VERSION} or newer, or Bun ${MINIMUM_BUN_VERSION} or newer below 2.0.0.`);
+}
+
+/**
+ * Whether the runtime an installation pinned still exists and reports a supported version. Hooks fail
+ * open, so a Node that an upgrade removed would otherwise go unnoticed; this makes it unhealthy instead.
+ */
+export function inspectInstalledRuntime(runtime) {
+  const result = { ...runtime, present: false, reportedVersion: null, supported: false };
+  if (!runtime?.path || !existsSync(runtime.path)) return result;
+  result.present = true;
+  const probe = spawnSync(runtime.path, ['--version'], { encoding: 'utf8', timeout: 10_000, windowsHide: true });
+  const reported = probe.status === 0 ? String(probe.stdout ?? '').trim().replace(/^v/u, '') : null;
+  if (!reported) return result;
+  result.reportedVersion = reported;
+  try {
+    assertSupportedRuntime({ name: runtime.name, version: reported, path: runtime.path });
+    result.supported = true;
+  } catch {
+    result.supported = false;
+  }
+  return result;
 }
 
 /** Blocks the thread for `milliseconds`; used only in short lock retry loops. */

@@ -21,7 +21,7 @@ import { fileURLToPath } from 'node:url';
 
 import { defaultRuntimeHome } from './platform-paths.mjs';
 import { POLICY_FILE, parseProviderPolicy } from './provider-policy.mjs';
-import { assertSupportedRuntime, runtimeInfo } from './runtime.mjs';
+import { assertSupportedRuntime, inspectInstalledRuntime, runtimeInfo } from './runtime.mjs';
 
 export const MINIMUM_BUN_VERSION = '1.4.0';
 
@@ -169,6 +169,16 @@ function assertSafeInputPath(path, name) {
   if (existsSync(path) && lstatSync(path).isSymbolicLink()) {
     throw new Error(`${name} must not be a symbolic link: ${path}`);
   }
+}
+
+// The runtime path is only executed, never written to, and pinning a stable symlink (a Homebrew or
+// nvm entry) is the point of passing it. It must still resolve to an existing regular file.
+function assertSafeRuntimePath(path) {
+  if (!isAbsolute(path)) throw new Error('RuntimePath must be an absolute path.');
+  if (/[\0\r\n]/u.test(path)) throw new Error('RuntimePath must not contain control characters.');
+  let target;
+  try { target = realpathSync(path); } catch { throw new Error(`RuntimePath does not exist: ${path}`); }
+  if (!lstatSync(target).isFile()) throw new Error(`RuntimePath must resolve to a file: ${path}`);
 }
 
 function walkFiles(root) {
@@ -426,8 +436,12 @@ function normalizeOptions(input = {}) {
     codexHome: resolve(input.codexHome ?? join(home, '.codex')),
     claudeHome: resolve(input.claudeHome ?? join(home, '.claude')),
     runtimeHome: resolve(input.runtimeHome ?? defaultRuntimeHome({ home, platform, env: input.env })),
-    // The runtime that runs the installer is the one the hooks will call: Node or Bun.
-    runtimePath: realpathSync(resolve(input.runtimePath ?? input.bunPath ?? process.execPath)),
+    // The runtime that runs the installer is the one the hooks will call: Node or Bun. An explicit
+    // path is recorded as given, so a stable entry (a Homebrew or nvm symlink) can be pinned instead
+    // of a versioned real path that the next upgrade removes.
+    runtimePath: input.runtimePath ?? input.bunPath
+      ? resolve(input.runtimePath ?? input.bunPath)
+      : realpathSync(process.execPath),
     expectedManifestDigest: input.expectedManifestDigest,
     expectedPlanDigest: input.expectedPlanDigest,
     providerPolicy: input.providerPolicy ? resolve(input.providerPolicy) : undefined,
@@ -440,9 +454,9 @@ function normalizeOptions(input = {}) {
     CodexHome: options.codexHome,
     ClaudeHome: options.claudeHome,
     RuntimeHome: options.runtimeHome,
-    RuntimePath: options.runtimePath,
     ...(options.providerPolicy ? { ProviderPolicy: options.providerPolicy } : {})
   })) assertSafeInputPath(path, name);
+  assertSafeRuntimePath(options.runtimePath);
   if (!['install', 'remove', 'rollback', 'adopt'].includes(options.action)) {
     throw new Error(`Unsupported installation action: ${options.action}`);
   }
@@ -908,6 +922,7 @@ export function verifyInstallation(input = {}) {
   const statePath = join(options.runtimeHome, 'install-state.json');
   if (!existsSync(statePath)) throw new Error(`No installation state was found at ${statePath}.`);
   const state = JSON.parse(readFileSync(statePath, 'utf8'));
+  const runtime = inspectInstalledRuntime(state.runtime);
   const targets = state.targets.map((target) => {
     const current = targetState(target);
     const matches = current.state === 'present' && (target.kind === 'config'
@@ -926,9 +941,9 @@ export function verifyInstallation(input = {}) {
     package: 'agent-context-broker',
     version: state.version,
     installedAt: state.installedAt,
-    runtime: state.runtime,
+    runtime,
     runtimeHome: options.runtimeHome,
-    healthy: targets.every((target) => target.matches),
+    healthy: runtime.supported && targets.every((target) => target.matches),
     targets
   };
 }

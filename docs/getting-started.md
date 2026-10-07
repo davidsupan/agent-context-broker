@@ -18,9 +18,15 @@ node --version
 ```
 
 The runtime that runs the installer is the runtime the hooks will call, so
-install with the Node you want the agents to use. An existing Bun installation
-keeps working; set `AGENT_CONTEXT_BROKER_RUNTIME=bun` for the POSIX launchers
-to keep choosing Bun where both are installed.
+install with the Node you want the agents to use. Pass `--runtime-path <path>`
+to pin a stable entry instead, for example `/opt/homebrew/bin/node` or an nvm
+shim: it is recorded exactly as given, whereas the default is the real path of
+the running executable, which a version upgrade can remove. The installation
+test and `doctor` report whether the pinned runtime still exists and reports a
+supported version (`installedRuntime`); hooks fail open, so this is the only
+place a vanished runtime shows up. An existing Bun installation keeps working;
+set `AGENT_CONTEXT_BROKER_RUNTIME=bun` for the POSIX launchers to keep choosing
+Bun where both are installed.
 
 ## Validate the checkout
 
