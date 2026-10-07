@@ -9,8 +9,12 @@ second hand-maintained changelog.
 2. Update the root and provider package versions together.
 3. Update version references in documentation, examples, and `site/index.html`.
 4. Run `npm run validate` on a supported platform.
-5. Run `npm pack --dry-run` and inspect the allowlisted package contents.
-6. Create the package archive with `npm pack` and record its SHA-256 digest.
+5. Run `npm run build` to stage the package in `build/package`, where every
+   TypeScript source (`.mts`) is shipped as JavaScript (`.mjs`). Then run
+   `npm pack ./build/package --dry-run` and inspect the allowlisted contents.
+6. Create the archive with `npm run pack:package` and record its SHA-256 digest.
+   Never pack the source tree directly: it may hold `.mts` files, which Node
+   refuses to run from `node_modules`.
 7. Tag the exact commit as `v<package-version>` and create a GitHub Release.
    Generate the initial notes from `.github/release.yml`, then review them for
    compatibility, security, and migration details before publishing. A release

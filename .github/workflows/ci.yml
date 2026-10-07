@@ -55,6 +55,36 @@ jobs:
       - run: sh -n scripts/*.sh
       - run: ./scripts/test-shell-installation.sh
 
+  # tsc --checkJs against the committed baseline: fails only on new type errors.
+  typecheck:
+    name: typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - run: npm ci --ignore-scripts
+      - run: npm run typecheck
+
+  # The staged package (TypeScript shipped as JavaScript) must pass the same checks and tests as the source.
+  test-package:
+    name: test-package
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - run: npm run build
+      - run: node scripts/check-package.mjs --installed
+        working-directory: build/package
+      - run: npm test
+        working-directory: build/package
+      - run: npm pack ./build/package --dry-run
+
   # Bun stays supported for this release; the next minor drops it.
   test-bun:
     name: test-bun

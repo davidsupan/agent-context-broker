@@ -17,7 +17,7 @@ import {
   persistLifecycleOutbox
 } from './lifecycle-events.mjs';
 import { stableJson, verifyEventStore } from './event-store.mjs';
-import { inspectInstalledRuntime } from './runtime.mjs';
+import { inspectInstalledRuntime } from './runtime.mts';
 
 function sha256(value) {
   return createHash('sha256').update(String(value), 'utf8').digest('hex');

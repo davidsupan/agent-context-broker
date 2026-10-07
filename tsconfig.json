@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "es2023",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "types": ["node"]
+  },
+  "include": [
+    "src/**/*.mjs", "src/**/*.mts",
+    "providers/**/*.mjs", "providers/**/*.mts",
+    "scripts/**/*.mjs", "scripts/**/*.mts",
+    "adapters/**/*.mjs", "adapters/**/*.mts"
+  ],
+  "exclude": ["node_modules", "build", "runtime", "**/test/**"]
+}

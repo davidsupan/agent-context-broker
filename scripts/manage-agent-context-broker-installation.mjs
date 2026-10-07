@@ -4,7 +4,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { manageInstallation } from '../src/installation.mjs';
-import { isMainModule } from '../src/runtime.mjs';
+import { isMainModule } from '../src/runtime.mts';
 
 const VALUE_OPTIONS = Object.freeze({
   '--provider': 'provider',

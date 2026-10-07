@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url';
 
 import { defaultRuntimeHome } from '../src/platform-paths.mjs';
 import { spawnSync } from 'node:child_process';
-import { isMainModule, sleepSync } from '../src/runtime.mjs';
+import { isMainModule, sleepSync } from '../src/runtime.mts';
 
 const COMMANDS = Object.freeze({
   query: 'context-query',

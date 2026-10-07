@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 import { spawnSync } from 'node:child_process';
 
-import { assertSupportedRuntime, runtimeInfo } from '../src/runtime.mjs';
+import { assertSupportedRuntime, runtimeInfo } from '../src/runtime.mts';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
@@ -74,13 +74,13 @@ const requiredFiles = Object.freeze([
   'profiles/context-profiles.json'
 ]);
 
-const textExtensions = new Set(['.css', '.html', '.json', '.jsonl', '.md', '.mjs', '.sh', '.txt', '.xml', '.yml', '.yaml']);
+const textExtensions = new Set(['.css', '.html', '.json', '.jsonl', '.md', '.mjs', '.mts', '.sh', '.txt', '.xml', '.yml', '.yaml']);
 const decoder = new TextDecoder('utf-8', { fatal: true });
 
 function walk(directory) {
   const files = [];
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
-    if (entry.name === '.git' || entry.name === 'node_modules' || entry.name === 'runtime') continue;
+    if (entry.name === '.git' || entry.name === 'node_modules' || entry.name === 'runtime' || entry.name === 'build') continue;
     const path = join(directory, entry.name);
     if (entry.isSymbolicLink()) throw new Error(`Symbolic link found in package: ${path}`);
     if (entry.isDirectory()) files.push(...walk(path));
@@ -98,7 +98,10 @@ for (const file of requiredFiles) {
   // Repository governance and the website are not part of the installed runtime.
   if (installed && (file === '.editorconfig' || file.startsWith('.github/') || file.startsWith('site/'))) continue;
   const path = join(root, ...file.split('/'));
-  if (!existsSync(path) || !lstatSync(path).isFile()) throw new Error(`Required package file is missing: ${file}`);
+  // In the source tree a required module may already be TypeScript (.mts); the staged package always has the .mjs.
+  const source = !installed && file.endsWith('.mjs') ? `${path.slice(0, -'.mjs'.length)}.mts` : null;
+  const present = (candidate) => existsSync(candidate) && lstatSync(candidate).isFile();
+  if (!present(path) && !(source && present(source))) throw new Error(`Required package file is missing: ${file}`);
 }
 
 const files = walk(root);
