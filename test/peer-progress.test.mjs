@@ -8,13 +8,13 @@ import { afterEach, describe, test } from 'node:test';
 
 import { sha256, verifyEventStore } from '../src/event-store.mjs';
 import { planContextQuery, runContextQuery } from '../src/context-query.mjs';
-import { projectReadModel } from '../src/read-model.mjs';
+import { projectReadModel } from '../src/read-model.mts';
 import {
   planPeerProgressPublication,
   publishPeerProgress,
   readPeerProgress
 } from '../src/peer-progress.mjs';
-import { attestSource, planSourceAttestation } from '../src/source-attestation.mjs';
+import { attestSource, planSourceAttestation } from '../src/source-attestation.mts';
 
 const roots = [];
 

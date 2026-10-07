@@ -9,7 +9,7 @@ import {
   planReconciliation,
   reconcileClaimBatch
 } from '../src/reconciliation.mjs';
-import { attestSource } from '../src/source-attestation.mjs';
+import { attestSource } from '../src/source-attestation.mts';
 import { verifyEventStore } from '../src/event-store.mjs';
 
 const temporaryRoots = [];

@@ -5,6 +5,24 @@ import {
   verifyEventStore
 } from './event-store.mjs';
 
+export type SourceAttestation = {
+  schemaVersion: 1;
+  provider: 'codex' | 'claude-code';
+  sessionKey: string;
+  recordKey: string;
+  sourceHash: string;
+  inventoryHash: string;
+  observedAt: string;
+  scope: { kind: string; keyHash: string };
+  sensitivity: 'shared' | 'private';
+};
+export type SourceProvenance = Pick<SourceAttestation, 'provider' | 'sessionKey' | 'recordKey' | 'sourceHash'>;
+export type SourceAttestationOptions = { attestation?: unknown; execute?: boolean; runtimeRoot?: string };
+export type SourceTokenOptions = { runtimeRoot?: string; sourceToken?: string };
+export type SourceAttestationPlan = { schemaVersion: number; mode: string; writesEnabled: boolean; attestationId: string; subjectRef: string; threadRef: string };
+export type SourceAttestationResult = { schemaVersion: number; mode: string; attestationId: string; eventId: string; subjectRef: string; threadRef: string; idempotentReplay: boolean };
+export type ResolvedSourceProvenance = SourceProvenance & { threadRef: string };
+
 const HASH = /^[a-f0-9]{64}$/u;
 const SOURCE_TOKEN = /^acb:\/\/source\/([a-f0-9]{64})$/u;
 const FIELDS = new Set([
@@ -12,33 +30,33 @@ const FIELDS = new Set([
   'inventoryHash', 'observedAt', 'scope', 'sensitivity'
 ]);
 
-function threadRef(sessionKey) {
+function threadRef(sessionKey: string): string {
   if (!HASH.test(sessionKey ?? '')) throw new Error('Thread reference requires a hashed session key.');
   return `context://thread/${sha256(`standalone-thread:${sessionKey}`)}`;
 }
 
-function isRecord(value) {
+function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-function validateAttestation(attestation) {
+function validateAttestation(attestation: unknown): asserts attestation is SourceAttestation {
   if (!isRecord(attestation) || Object.keys(attestation).length !== FIELDS.size ||
       Object.keys(attestation).some((key) => !FIELDS.has(key)) ||
       attestation.schemaVersion !== 1 ||
-      !['codex', 'claude-code'].includes(attestation.provider) ||
+      !['codex', 'claude-code'].includes(attestation.provider as string) ||
       ![attestation.sessionKey, attestation.recordKey, attestation.sourceHash,
-        attestation.inventoryHash].every((value) => HASH.test(value ?? '')) ||
+        attestation.inventoryHash].every((value) => HASH.test((value ?? '') as string)) ||
       typeof attestation.observedAt !== 'string' ||
       Number.isNaN(Date.parse(attestation.observedAt)) ||
       !isRecord(attestation.scope) || Object.keys(attestation.scope).length !== 2 ||
-      !['global', 'project', 'workstream', 'ticket', 'merge-request'].includes(attestation.scope.kind) ||
-      !HASH.test(attestation.scope.keyHash ?? '') ||
-      !['shared', 'private'].includes(attestation.sensitivity)) {
+      !['global', 'project', 'workstream', 'ticket', 'merge-request'].includes(attestation.scope.kind as string) ||
+      !HASH.test((attestation.scope.keyHash ?? '') as string) ||
+      !['shared', 'private'].includes(attestation.sensitivity as string)) {
     throw new Error('Source attestation input is invalid.');
   }
 }
 
-function attestationCore(attestation) {
+function attestationCore(attestation: SourceAttestation) {
   return {
     provider: attestation.provider,
     sessionKey: attestation.sessionKey,
@@ -51,11 +69,11 @@ function attestationCore(attestation) {
   };
 }
 
-function attestationId(attestation) {
+function attestationId(attestation: SourceAttestation): string {
   return sha256(stableJson(attestationCore(attestation)));
 }
 
-function brokerEvent(attestation) {
+function brokerEvent(attestation: SourceAttestation) {
   const id = attestationId(attestation);
   return {
     idempotencyKey: id,
@@ -90,7 +108,7 @@ function brokerEvent(attestation) {
   };
 }
 
-export function planSourceAttestation(inputOptions = {}) {
+export function planSourceAttestation(inputOptions: SourceAttestationOptions = {}): SourceAttestationPlan {
   validateAttestation(inputOptions.attestation);
   const id = attestationId(inputOptions.attestation);
   return {
@@ -103,7 +121,7 @@ export function planSourceAttestation(inputOptions = {}) {
   };
 }
 
-export async function attestSource(inputOptions = {}) {
+export async function attestSource(inputOptions: SourceAttestationOptions = {}): Promise<SourceAttestationResult> {
   if (inputOptions.execute !== true || !inputOptions.runtimeRoot) {
     throw new Error('Source attestation requires execute: true and runtimeRoot.');
   }
@@ -123,13 +141,13 @@ export async function attestSource(inputOptions = {}) {
   };
 }
 
-export function isSourceAttested(inputOptions = {}) {
+export function isSourceAttested(inputOptions: { runtimeRoot?: string; provenance?: SourceProvenance } = {}): boolean {
   if (!inputOptions.runtimeRoot) return false;
   const provenance = inputOptions.provenance;
   if (!isRecord(provenance) ||
       !['codex', 'claude-code'].includes(provenance.provider) ||
       ![provenance.sessionKey, provenance.recordKey, provenance.sourceHash]
-        .every((value) => HASH.test(value ?? ''))) {
+        .every((value) => HASH.test((value ?? '') as string))) {
     return false;
   }
   const { events } = verifyEventStore({ runtimeRoot: inputOptions.runtimeRoot });
@@ -141,7 +159,7 @@ export function isSourceAttested(inputOptions = {}) {
     event.redactionResult === 'clean');
 }
 
-export function provenanceForSourceToken(inputOptions = {}) {
+export function provenanceForSourceToken(inputOptions: SourceTokenOptions = {}): ResolvedSourceProvenance {
   if (!inputOptions.runtimeRoot || typeof inputOptions.sourceToken !== 'string') {
     throw new Error('Source token resolution requires runtimeRoot and sourceToken.');
   }

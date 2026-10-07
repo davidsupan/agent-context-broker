@@ -12,8 +12,16 @@ import {
 } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 
-import * as claudeCode from './claude-inventory.mjs';
-import * as codex from './codex-inventory-v2.mjs';
+import * as claudeCode from './claude-inventory.mts';
+import * as codex from './codex-inventory-v2.mts';
+
+export type FallbackProvider = 'codex' | 'claude-code';
+export type FallbackSource = { provider: FallbackProvider; source: string; recursive?: boolean; maxFiles?: number };
+export type FallbackSweepOptions = { runtimeRoot: string; sources: unknown; now?: string | number | Date; execute?: boolean; minimumIntervalSeconds?: number; maxSources?: number; maxFilesPerSource?: number; maxScanBytes?: number; tailBootstrapBytes?: number };
+export type FallbackSweepPlan = { schemaVersion: number; mode: string; generatedAt: string; due: boolean; nextEligibleAt: string | null; writesEnabled: boolean; sources: { provider: FallbackProvider; sourceKey: string; selectedSourceCount: number; skippedByFileLimitCount: number; limits: unknown }[] };
+export type FallbackSweepRunResult = { schemaVersion: number; mode: string; state: string; nextEligibleAt?: string | null; writesEnabled: boolean; sources: unknown[]; sweepId?: string; completedAt?: string; minimumIntervalSeconds?: number };
+type SweepState = { schemaVersion: number; lastCompletedAt: string | null; lastSweepId?: string };
+type SweepSettings = Required<Pick<FallbackSweepOptions, 'minimumIntervalSeconds' | 'maxSources' | 'maxFilesPerSource' | 'maxScanBytes' | 'tailBootstrapBytes'>> & FallbackSweepOptions;
 
 const ADAPTERS = Object.freeze({ codex, 'claude-code': claudeCode });
 const DEFAULTS = Object.freeze({
@@ -24,11 +32,15 @@ const DEFAULTS = Object.freeze({
   tailBootstrapBytes: 1024 * 1024
 });
 
-function delay(milliseconds) {
+function delay(milliseconds: number): Promise<void> {
   return new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds));
 }
 
-async function withSweepLock(path, action) {
+function errorCode(error: unknown): unknown {
+  return error !== null && typeof error === 'object' && 'code' in error ? error.code : undefined;
+}
+
+async function withSweepLock<T>(path: string, action: () => Promise<T>): Promise<T> {
   mkdirSync(dirname(path), { recursive: true });
   const startedAt = Date.now();
   let descriptor;
@@ -36,14 +48,14 @@ async function withSweepLock(path, action) {
     try {
       descriptor = openSync(path, 'wx');
     } catch (error) {
-      if (error?.code !== 'EEXIST') throw error;
+      if (errorCode(error) !== 'EEXIST') throw error;
       try {
         if (Date.now() - statSync(path).mtimeMs > 300000) {
           unlinkSync(path);
           continue;
         }
       } catch (statError) {
-        if (statError?.code !== 'ENOENT') throw statError;
+        if (errorCode(statError) !== 'ENOENT') throw statError;
         continue;
       }
       if (Date.now() - startedAt >= 2000) throw new Error('Fallback sweep is busy.');
@@ -57,16 +69,16 @@ async function withSweepLock(path, action) {
     try {
       unlinkSync(path);
     } catch (error) {
-      if (error?.code !== 'ENOENT') throw error;
+      if (errorCode(error) !== 'ENOENT') throw error;
     }
   }
 }
 
-function hash(value) {
+function hash(value: unknown): string {
   return createHash('sha256').update(String(value), 'utf8').digest('hex');
 }
 
-function atomicWrite(path, value) {
+function atomicWrite(path: string, value: string): void {
   mkdirSync(dirname(path), { recursive: true });
   const temporary = join(dirname(path), `.${basename(path)}.${process.pid}.${randomUUID()}.tmp`);
   try {
@@ -77,23 +89,24 @@ function atomicWrite(path, value) {
   }
 }
 
-function writeJson(path, value) {
+function writeJson(path: string, value: unknown): void {
   atomicWrite(path, `${JSON.stringify(value, null, 2)}\n`);
 }
 
-function validateSources(sources, maxSources) {
+function validateSources(sources: unknown, maxSources: number): FallbackSource[] {
   if (!Array.isArray(sources) || sources.length === 0 || sources.length > maxSources) {
     throw new Error(`Fallback sweep requires 1-${maxSources} explicit sources.`);
   }
-  return sources.map((entry) => {
-    if (!ADAPTERS[entry?.provider] || typeof entry?.source !== 'string') {
+  return sources.map((entry: unknown) => {
+    const item = entry !== null && typeof entry === 'object' ? entry as Record<string, unknown> : null;
+    if (!item || typeof item.provider !== 'string' || !(item.provider in ADAPTERS) || typeof item.source !== 'string') {
       throw new Error('Fallback sweep source requires a supported provider and path.');
     }
-    return { ...entry, source: resolve(entry.source) };
+    return { ...item, provider: item.provider as FallbackProvider, source: resolve(item.source) } as FallbackSource;
   });
 }
 
-function optionsFor(entry, options) {
+function optionsFor(entry: FallbackSource, options: SweepSettings) {
   return {
     source: entry.source,
     recursive: entry.recursive === true,
@@ -104,14 +117,14 @@ function optionsFor(entry, options) {
   };
 }
 
-function loadSweepState(path) {
+function loadSweepState(path: string): SweepState {
   if (!existsSync(path)) return { schemaVersion: 1, lastCompletedAt: null };
-  const state = JSON.parse(readFileSync(path, 'utf8'));
+  const state = JSON.parse(readFileSync(path, 'utf8')) as SweepState;
   if (state.schemaVersion !== 1) throw new Error('Unsupported fallback sweep state.');
   return state;
 }
 
-function dueStatus(state, now, minimumIntervalSeconds) {
+function dueStatus(state: SweepState, now: Date, minimumIntervalSeconds: number): { due: boolean; nextEligibleAt: string | null } {
   if (!state.lastCompletedAt) return { due: true, nextEligibleAt: null };
   const next = new Date(
     new Date(state.lastCompletedAt).getTime() + minimumIntervalSeconds * 1000
@@ -119,8 +132,8 @@ function dueStatus(state, now, minimumIntervalSeconds) {
   return { due: now.getTime() >= next.getTime(), nextEligibleAt: next.toISOString() };
 }
 
-export async function planFallbackSweep(inputOptions) {
-  const options = { ...DEFAULTS, ...inputOptions };
+export async function planFallbackSweep(inputOptions: FallbackSweepOptions): Promise<FallbackSweepPlan> {
+  const options: SweepSettings = { ...DEFAULTS, ...inputOptions };
   const sources = validateSources(options.sources, options.maxSources);
   const now = options.now ? new Date(options.now) : new Date();
   const runtimeRoot = resolve(options.runtimeRoot);
@@ -151,8 +164,8 @@ export async function planFallbackSweep(inputOptions) {
   };
 }
 
-export async function runFallbackSweep(inputOptions) {
-  const options = { ...DEFAULTS, ...inputOptions };
+export async function runFallbackSweep(inputOptions: FallbackSweepOptions): Promise<FallbackSweepRunResult> {
+  const options: SweepSettings = { ...DEFAULTS, ...inputOptions };
   if (options.execute !== true) throw new Error('Fallback sweep writes require execute: true.');
   const sources = validateSources(options.sources, options.maxSources);
   const now = options.now ? new Date(options.now) : new Date();

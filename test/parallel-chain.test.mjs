@@ -6,9 +6,9 @@ import { join } from 'node:path';
 import { afterEach, describe, test } from 'node:test';
 
 import { appendBrokerEvent, sha256, verifyEventStore } from '../src/event-store.mjs';
-import { deliverLifecycleOutbox } from '../src/lifecycle-events.mjs';
+import { deliverLifecycleOutbox } from '../src/lifecycle-events.mts';
 import { planPeerProgressPublication, publishPeerProgress } from '../src/peer-progress.mjs';
-import { attestSource, planSourceAttestation } from '../src/source-attestation.mjs';
+import { attestSource, planSourceAttestation } from '../src/source-attestation.mts';
 
 const roots = [];
 

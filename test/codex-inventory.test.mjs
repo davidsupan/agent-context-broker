@@ -22,7 +22,7 @@ import {
   readSourceIdentity,
   readRelatedDeltas,
   runInventory
-} from '../src/codex-inventory-v2.mjs';
+} from '../src/codex-inventory-v2.mts';
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const fixtures = join(packageRoot, 'fixtures');

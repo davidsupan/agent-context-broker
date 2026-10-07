@@ -15,7 +15,7 @@ import { afterEach, describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { planContextRefresh, runContextRefresh } from '../src/context-refresh.mjs';
-import * as codex from '../src/codex-inventory-v2.mjs';
+import * as codex from '../src/codex-inventory-v2.mts';
 import { reconcileClaimBatch } from '../src/reconciliation.mjs';
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');

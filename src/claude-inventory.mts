@@ -6,7 +6,23 @@ import {
 
 export const ADAPTER_VERSION = '0.1.0';
 
-function firstString(records, selector) {
+export type ClaudeInventoryRecord = {
+  sessionId?: unknown;
+  cwd?: unknown;
+  gitBranch?: unknown;
+  parentUuid?: unknown;
+  type?: unknown;
+  timestamp?: unknown;
+};
+export type ClaudeInventoryMetadata = {
+  sessionId: string | null;
+  cwd: string | null;
+  gitBranch: string | null;
+  parentUuid: string | null;
+};
+export type ClaudeInventoryOptions = { source: string; recursive?: boolean; maxFiles?: number; maxScanBytes?: number; tailBootstrapBytes?: number; now?: string | number | Date; [key: string]: unknown };
+
+function firstString(records: ClaudeInventoryRecord[], selector: (record: ClaudeInventoryRecord) => unknown): string | null {
   for (const record of records) {
     const value = selector(record);
     if (typeof value === 'string' && value.length > 0) {
@@ -16,7 +32,7 @@ function firstString(records, selector) {
   return null;
 }
 
-function nativeMetadata(records) {
+function nativeMetadata(records: ClaudeInventoryRecord[]): ClaudeInventoryMetadata {
   return {
     sessionId: firstString(records, (record) => record?.sessionId),
     cwd: firstString(records, (record) => record?.cwd),
@@ -31,12 +47,12 @@ const adapter = createMetadataInventoryAdapter({
   sourceNamespace: 'claude-code-history',
   terminalStates: new Set(['completed', 'aborted']),
 
-  hasRequiredMetadata(records) {
+  hasRequiredMetadata(records: ClaudeInventoryRecord[]) {
     const metadata = nativeMetadata(records);
     return Boolean(metadata.sessionId && metadata.cwd);
   },
 
-  metadataFromRecords(records, sourceId) {
+  metadataFromRecords(records: ClaudeInventoryRecord[], sourceId: string) {
     const metadata = nativeMetadata(records);
     if (!metadata.sessionId) {
       return null;
@@ -60,7 +76,7 @@ const adapter = createMetadataInventoryAdapter({
     };
   },
 
-  inspectRecord(record) {
+  inspectRecord(record: ClaudeInventoryRecord) {
     return {
       recordType: record?.type,
       timestamp: record?.timestamp,
@@ -68,7 +84,7 @@ const adapter = createMetadataInventoryAdapter({
     };
   },
 
-  stateForLifecycle(lifecycle) {
+  stateForLifecycle(lifecycle: string) {
     switch (lifecycle) {
       case 'session_start': return 'active';
       case 'session_end': return 'completed';
@@ -78,9 +94,20 @@ const adapter = createMetadataInventoryAdapter({
   }
 });
 
+export type ClaudeInventoryPlan = Awaited<ReturnType<typeof adapter.planInventory>>;
+export type ClaudeInventorySourceIdentity = Awaited<ReturnType<typeof adapter.readSourceIdentity>>;
+export type ClaudeRelatedDeltas = Awaited<ReturnType<typeof adapter.readRelatedDeltas>>;
+export type ClaudeInventoryResult = Awaited<ReturnType<typeof adapter.runInventory>>;
+type ClaudeInventoryExports = {
+  planInventory: (options: ClaudeInventoryOptions) => Promise<ClaudeInventoryPlan>;
+  readRelatedDeltas: (options: ClaudeInventoryOptions) => Promise<ClaudeRelatedDeltas>;
+  readSourceIdentity: (source: string) => Promise<ClaudeInventorySourceIdentity>;
+  runInventory: (options: ClaudeInventoryOptions) => Promise<ClaudeInventoryResult>;
+};
+
 export const {
   planInventory,
   readRelatedDeltas,
   readSourceIdentity,
   runInventory
-} = adapter;
+}: ClaudeInventoryExports = adapter;

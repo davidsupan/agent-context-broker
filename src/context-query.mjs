@@ -15,11 +15,11 @@ import {
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
-import { normalizeAgentDescriptor } from './agent-identity.mjs';
-import { loadContextProfiles, routeContextProfile } from './context-router.mjs';
+import { normalizeAgentDescriptor } from './agent-identity.mts';
+import { loadContextProfiles, routeContextProfile } from './context-router.mts';
 import { readPeerProgress } from './peer-progress.mjs';
 import { policyEntry, scopeReadable } from './provider-policy.mjs';
-import { relationsForScope, reviewLedgerContext } from './work-ledgers.mjs';
+import { relationsForScope, reviewLedgerContext } from './work-ledgers.mts';
 
 const PROVIDERS = new Set(['codex', 'claude-code']);
 const HASH = /^[a-f0-9]{64}$/u;

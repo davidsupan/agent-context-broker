@@ -15,7 +15,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 import {
   deliverLifecycleOutbox,
   persistLifecycleOutbox
-} from './lifecycle-events.mjs';
+} from './lifecycle-events.mts';
 import { stableJson, verifyEventStore } from './event-store.mjs';
 import { inspectInstalledRuntime } from './runtime.mts';
 

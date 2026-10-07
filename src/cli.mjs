@@ -2,8 +2,8 @@
 
 import { readFileSync } from 'node:fs';
 
-import * as claudeCode from './claude-inventory.mjs';
-import * as codex from './codex-inventory-v2.mjs';
+import * as claudeCode from './claude-inventory.mts';
+import * as codex from './codex-inventory-v2.mts';
 import { planContextQuery, runContextQuery } from './context-query.mjs';
 import { runClaimsCommand } from './claims-export-cli.mts';
 import { runWithdrawCommand } from './claims-withdraw-cli.mts';
@@ -14,21 +14,21 @@ import {
   publishPeerProgress
 } from './peer-progress.mjs';
 import { planContextRefresh, runContextRefresh } from './context-refresh.mjs';
-import { loadContextProfiles, routeContextProfile } from './context-router.mjs';
+import { loadContextProfiles, routeContextProfile } from './context-router.mts';
 import {
   decideCorrection,
   planCorrectionDecision,
   planCorrectionProposal,
   proposeCorrection
-} from './corrections.mjs';
+} from './corrections.mts';
 import {
   appendBrokerEvent,
   planBrokerEvent,
   repairEventHead,
   verifyEventStore
 } from './event-store.mjs';
-import { planFallbackSweep, runFallbackSweep } from './fallback-sweep.mjs';
-import { planReadModel, projectReadModel } from './read-model.mjs';
+import { planFallbackSweep, runFallbackSweep } from './fallback-sweep.mts';
+import { planReadModel, projectReadModel } from './read-model.mts';
 import { planReconciliation, reconcileClaimBatch } from './reconciliation.mjs';
 import {
   diagnoseBroker,
@@ -39,7 +39,7 @@ import {
   attestSource,
   isSourceAttested,
   planSourceAttestation
-} from './source-attestation.mjs';
+} from './source-attestation.mts';
 
 const ADAPTERS = Object.freeze({ codex, 'claude-code': claudeCode });
 

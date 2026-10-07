@@ -8,7 +8,7 @@ import { afterEach, describe, test } from 'node:test';
 import { planContextQuery } from '../src/context-query.mjs';
 import { planContextPublication, publishContext } from '../src/context-publish.mjs';
 import { sha256 } from '../src/event-store.mjs';
-import { attestSource, planSourceAttestation } from '../src/source-attestation.mjs';
+import { attestSource, planSourceAttestation } from '../src/source-attestation.mts';
 
 const roots = [];
 

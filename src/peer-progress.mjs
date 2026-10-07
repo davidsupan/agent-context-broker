@@ -13,7 +13,7 @@ import {
 import { basename, dirname, join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
-import { isStoredAgentDescriptor, normalizeAgentDescriptor } from './agent-identity.mjs';
+import { isStoredAgentDescriptor, normalizeAgentDescriptor } from './agent-identity.mts';
 import { unsafeContentReason } from './content-safety.mjs';
 import {
   appendBrokerEvent,
@@ -23,12 +23,12 @@ import {
   verifyEventTail
 } from './event-store.mjs';
 import { assertPublishable, policyEntry, scopeReadable } from './provider-policy.mjs';
-import { provenanceForSourceToken } from './source-attestation.mjs';
+import { provenanceForSourceToken } from './source-attestation.mts';
 import {
   relationsForScope,
   reviewLedgerRelations,
   ticketPackageRelations
-} from './work-ledgers.mjs';
+} from './work-ledgers.mts';
 
 const HASH = /^[a-f0-9]{64}$/u;
 const ISSUE_KEY = /^[A-Z][A-Z0-9]{1,15}-\d+$/u;

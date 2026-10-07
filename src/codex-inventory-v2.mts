@@ -6,8 +6,16 @@ import {
 
 export const ADAPTER_VERSION = '0.2.0';
 
-function sessionMetadata(records) {
-  return records.find((record) =>
+export type CodexInventoryRecord = {
+  type?: unknown;
+  timestamp?: unknown;
+  payload?: { id?: unknown; cwd?: unknown; git?: { repository_url?: unknown; branch?: unknown }; forked_from_id?: unknown; type?: unknown };
+};
+export type CodexSessionMetadata = CodexInventoryRecord & { payload: NonNullable<CodexInventoryRecord['payload']> & { id: string } };
+export type CodexInventoryOptions = { source: string; recursive?: boolean; maxFiles?: number; maxScanBytes?: number; tailBootstrapBytes?: number; now?: string | number | Date; [key: string]: unknown };
+
+function sessionMetadata(records: CodexInventoryRecord[]): CodexSessionMetadata | undefined {
+  return records.find((record): record is CodexSessionMetadata =>
     record?.type === 'session_meta' &&
     typeof record?.payload?.id === 'string'
   );
@@ -19,11 +27,11 @@ const adapter = createMetadataInventoryAdapter({
   sourceNamespace: 'codex-rollout',
   terminalStates: new Set(['completed', 'aborted']),
 
-  hasRequiredMetadata(records) {
+  hasRequiredMetadata(records: CodexInventoryRecord[]) {
     return Boolean(sessionMetadata(records));
   },
 
-  metadataFromRecords(records) {
+  metadataFromRecords(records: CodexInventoryRecord[]) {
     const record = sessionMetadata(records);
     if (!record) {
       return null;
@@ -46,7 +54,7 @@ const adapter = createMetadataInventoryAdapter({
     };
   },
 
-  inspectRecord(record) {
+  inspectRecord(record: CodexInventoryRecord) {
     const lifecycle = record?.type === 'event_msg' &&
       typeof record?.payload?.type === 'string'
       ? record.payload.type
@@ -58,7 +66,7 @@ const adapter = createMetadataInventoryAdapter({
     };
   },
 
-  stateForLifecycle(lifecycle) {
+  stateForLifecycle(lifecycle: string) {
     switch (lifecycle) {
       case 'task_complete': return 'completed';
       case 'turn_aborted': return 'aborted';
@@ -68,9 +76,20 @@ const adapter = createMetadataInventoryAdapter({
   }
 });
 
+export type CodexInventoryPlan = Awaited<ReturnType<typeof adapter.planInventory>>;
+export type CodexInventorySourceIdentity = Awaited<ReturnType<typeof adapter.readSourceIdentity>>;
+export type CodexRelatedDeltas = Awaited<ReturnType<typeof adapter.readRelatedDeltas>>;
+export type CodexInventoryResult = Awaited<ReturnType<typeof adapter.runInventory>>;
+type CodexInventoryExports = {
+  planInventory: (options: CodexInventoryOptions) => Promise<CodexInventoryPlan>;
+  readRelatedDeltas: (options: CodexInventoryOptions) => Promise<CodexRelatedDeltas>;
+  readSourceIdentity: (source: string) => Promise<CodexInventorySourceIdentity>;
+  runInventory: (options: CodexInventoryOptions) => Promise<CodexInventoryResult>;
+};
+
 export const {
   planInventory,
   readRelatedDeltas,
   readSourceIdentity,
   runInventory
-} = adapter;
+}: CodexInventoryExports = adapter;
