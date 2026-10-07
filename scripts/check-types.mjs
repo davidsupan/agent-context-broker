@@ -25,13 +25,18 @@ if (!existsSync(tsc)) {
 
 const run = spawnSync(process.execPath, [tsc, '-p', join(root, 'tsconfig.json'), '--pretty', 'false'], { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 if (run.error) throw run.error;
+// Messages can name the checkout's absolute path (`typeof import("C:/w/x/src/a")`); keys must not depend on where
+// the repository is checked out, so the root becomes `<root>` in every message.
+const escapeRegExp = (/** @type {string} */ text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const rootPattern = new RegExp(escapeRegExp(root.replace(/\\/g, '/')), 'gi');
+export const normaliseMessage = (/** @type {string} */ message) => message.replace(/\\/g, '/').replace(rootPattern, '<root>');
 const lines = `${run.stdout}${run.stderr}`.split(/\r?\n/);
 const counts = {};
 let unparsed = 0;
 for (const line of lines) {
   const match = /^(.+?)\(\d+,\d+\): error (TS\d+): (.*)$/.exec(line);
   if (match) {
-    const key = `${match[1].replace(/\\/g, '/')} | ${match[2]} | ${match[3]}`;
+    const key = `${match[1].replace(/\\/g, '/')} | ${match[2]} | ${normaliseMessage(match[3])}`;
     counts[key] = (counts[key] ?? 0) + 1;
   } else if (/error TS\d+/.test(line)) unparsed += 1;
 }
