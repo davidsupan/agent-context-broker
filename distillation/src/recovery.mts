@@ -195,7 +195,9 @@ export async function recover(home: string, input: WorkerPolicyInput, execute = 
       // Fresh copies prevent a probe from mutating the descriptors being checked.
       if (await probes.ownerStatus({ ...owner }) !== 'dead') stop('owner-not-proved-ended');
       const state = await probes.containmentStatus({ ...containment });
-      if (state !== 'empty' && state !== 'absent') stop('containment-unresolved');
+      // The durable reserved phase proves dispatch never began. Once dispatch intent is
+      // committed, only positive accounting evidence can release the lease.
+      if (state !== 'empty' && !(initial.attempt.execution_phase === 'reserved' && (state === 'absent' || state === 'unknown'))) stop('containment-unresolved');
     };
     const path = join(home, 'semantic-results', `${initial.attempt.token}.json`);
     const file = resultFile(path);

@@ -109,8 +109,8 @@ test('proven dead predispatch releases only the lease, preserving the charged re
   expect(inspect(f.home, 'SELECT seconds FROM semantic_budget')[0]!.seconds).toBe(120);
 });
 
-test('postdispatch missing results retire the slice only after definite empty or absent containment', async () => {
-  for (const containment of ['empty', 'absent'] as const) {
+test('postdispatch missing results retire the slice only after definite empty containment', async () => {
+  for (const containment of ['empty'] as const) {
     const f = fixture();
     const probes: RecoveryProbes = { ownerStatus: async () => 'dead' as const, containmentStatus: async () => containment };
     expect(await recover(f.home, policy, false, probes)).toMatchObject({ state: 'recoverable-unknown', writes: false });
@@ -125,6 +125,16 @@ test('postdispatch missing results retire the slice only after definite empty or
   }
 });
 
+test('only the durable reserved phase can recover without a registry record', async () => {
+  for (const dispatched of [false, true]) {
+    const f = fixture(dispatched);
+    const result = await recover(f.home, policy, true, { ...ended, containmentStatus: () => 'unknown' });
+    expect(result).toMatchObject(dispatched ? { state: 'containment-unresolved', writes: false }
+      : { state: 'recovered-before-dispatch', writes: true });
+    if (dispatched) unchanged(f.home);
+  }
+});
+
 test('alive, unknown, throwing or unavailable probes never expire old leases', async () => {
   const f = fixture(); f.persist();
   mutate(f.home, 'UPDATE semantic_attempts SET started_at=1');
@@ -134,7 +144,7 @@ test('alive, unknown, throwing or unavailable probes never expire old leases', a
     expect(await recover(f.home, policy, true, probes)).toMatchObject({ state: 'owner-not-proved-ended', writes: false });
     expect(containmentCalls).toBe(0); unchanged(f.home);
   }
-  for (const state of ['active', 'unknown'] as const) {
+  for (const state of ['active', 'unknown', 'absent'] as const) {
     expect(await recover(f.home, policy, true, { ...ended, containmentStatus: async () => state })).toMatchObject({ state: 'containment-unresolved', writes: false });
     unchanged(f.home);
   }

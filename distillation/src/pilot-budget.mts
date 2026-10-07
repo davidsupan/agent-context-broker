@@ -10,17 +10,18 @@ const Approval = z.string().regex(/^[A-Za-z0-9_.:-]{1,120}$/);
 const Request = z.strictObject({ approvalId: Approval, provider: z.enum(['claude', 'codex']),
   seconds: z.literal(60), globalBudgetSeconds: z.literal(1800) });
 const Proof = z.strictObject({ completionProof: z.enum(['process-tree-empty-v1', 'windows-atomic-job-empty-v1', 'windows-job-empty-v1']),
-  durationMs: z.number().finite().min(0).max(60000), exitCode: z.number().int() });
+  durationMs: z.number().finite().min(0), exitCode: z.number().int() });
 
 /** Separate approved synthetic probes, but the SAME ledger and active-worker
  * table as corpus work. A Codex probe is not mislabelled as a quota fallback.
  */
-export function liveProbeCoordinator(home: string, approvedId: string): LiveProbeCoordinator {
+export function liveProbeCoordinator(home: string, approvedId: string,
+  probes = { owner: ownProcessIdentity, job: probeNamedJob }): LiveProbeCoordinator {
   Approval.parse(approvedId);
   return { async reserve(input) {
     const request = Request.parse(input);
     if (request.approvalId !== approvedId) throw new Error('pilot-approval-mismatch');
-    const owner = await ownProcessIdentity();
+    const owner = await probes.owner();
     if (!owner) throw new Error('pilot-owner-unverified');
     using db = openStore(join(home, 'queue.sqlite3'), { readonly: false }); setup(db);
     const now = Date.now() / 1000, day = new Date(now * 1000).toISOString().slice(0, 10);
@@ -43,14 +44,15 @@ export function liveProbeCoordinator(home: string, approvedId: string): LiveProb
     }).immediate();
     return { reservationId: token, jobName, async settle(inputProof) {
       const proof = Proof.parse(inputProof);
-      const state = await probeNamedJob(jobName);
-      if (state !== 'empty' && state !== 'absent') throw new Error('pilot-containment-unresolved');
+      const state = await probes.job(jobName);
+      if (state !== 'empty') throw new Error('pilot-containment-unresolved');
+      const overrun = proof.durationMs > 60000;
       using current = openStore(join(home, 'queue.sqlite3'), { readonly: false });
       current.transaction(() => {
         // Receipt and lease release commit together. No refund or approval reuse.
         current.run('CREATE TABLE IF NOT EXISTS semantic_pilot_results(token TEXT PRIMARY KEY,proof_json TEXT NOT NULL)');
-        const result = current.query("UPDATE semantic_attempts SET state='pilot-process-ended',finished_at=?,execution_phase='finished' WHERE token=? AND state='running' AND reason='user-approved-synthetic-pilot'")
-          .run(Date.now() / 1000, token);
+        const result = current.query("UPDATE semantic_attempts SET state=?,error=?,finished_at=?,execution_phase='finished' WHERE token=? AND state='running' AND reason='user-approved-synthetic-pilot'")
+          .run(overrun ? 'pilot-process-failed' : 'pilot-process-ended', overrun ? 'pilot-deadline-exceeded' : null, Date.now() / 1000, token);
         if (result.changes !== 1) throw new Error('pilot-reservation-changed');
         current.query('INSERT INTO semantic_pilot_results VALUES(?,?)').run(token, canonical(proof));
       }).immediate();

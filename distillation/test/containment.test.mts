@@ -52,11 +52,11 @@ g.unref(); setTimeout(() => process.exit(0), 300);`;
   assert.equal(result.containmentEmpty, true);
 });
 
-test('a labelled run is recorded; its label then reads empty, an unknown label absent, a reused label refused', async () => {
+test('a labelled run is recorded; its label then reads empty, a missing label unknown, a reused label refused', async () => {
   const jobName = `Local\\ACBTest-${process.pid}-${Date.now()}`;
   await runContained({ ...base, jobName, args: script('process.exit(0)') });
   assert.equal(await probeNamedJob(jobName), 'empty');
-  assert.equal(await probeNamedJob(`Local\\ACBTest-missing-${Date.now()}`), 'absent');
+  assert.equal(await probeNamedJob(`Local\\ACBTest-missing-${Date.now()}`), 'unknown');
   assert.equal(await probeNamedJob('not a label'), 'unknown');
   await assert.rejects(runContained({ ...base, jobName, args: script('process.exit(0)') }), /job-name-already-exists/);
 });

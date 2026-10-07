@@ -69,9 +69,9 @@ describe('durable recovery snapshots', () => {
     for (let i = 0; i < 8; i++) expect(await probeOwner(identity)).toBe('alive');
   });
 
-  nativeTest('a missing label is absent; invalid labels are unknown; a finished label is empty', async () => {
+  nativeTest('a missing label is unknown; invalid labels are unknown; a finished label is empty', async () => {
     const name = 'Local\\acb-probe-' + randomUUID();
-    expect(await probeNamedJob(name)).toBe('absent');
+    expect(await probeNamedJob(name)).toBe('unknown');
     for (const value of [null, '', 'Global\\job', 'Local\\bad\0name', 'Local\\' + 'x'.repeat(181)])
       expect(await probeNamedJob(value)).toBe('unknown');
     await runContained(options('process.exit(0)', { jobName: name }));

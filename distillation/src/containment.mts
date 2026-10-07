@@ -7,7 +7,9 @@
 //   SIGKILL after a grace period. Empty means `kill(-pgid, 0)` reports ESRCH. A descendant that calls setsid()
 //   leaves the group and is not contained; the provider's command does not do that.
 // - Windows: a compiled-per-run helper creates the child atomically in a non-breakaway Job Object.
-//   Only the job's active-process count reaching zero is cleanup proof, including orphaned descendants.
+//   Cleanup requires zero active processes and a terminated helper or terminal acknowledgement.
+//   The guarantee covers process lifetime and environment for cooperative children. Same-user debug
+//   privileges, code injection, and tampering with the broker's files are outside this boundary.
 //
 // A run label (`jobName`, kept as `Local\ACBCorpus-<token>` for the existing records) names a small registry file,
 // so a later process can ask whether a run it did not start is still active (`probeNamedJob`).
@@ -19,6 +21,7 @@ import { isAbsolute, join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { sha256Hex } from './platform.mts';
 import { runWindowsContained, probeWindowsJob, windowsLauncherAvailable } from './windows-launcher.mts';
+import { windowsHost } from './windows-host.mts';
 export { windowsLauncherAvailable } from './windows-launcher.mts';
 
 export interface ContainedOptions {
@@ -75,8 +78,11 @@ const supported = () => (WINDOWS ? process.arch === 'x64' : POSIX);
 const platformName = (): ProcessIdentity['platform'] => (WINDOWS ? 'windows' : process.platform === 'darwin' ? 'darwin' : 'linux');
 
 function run(file: string, args: string[], timeoutMs = 15000): Promise<{ code: number; stdout: string }> {
+  const host = WINDOWS ? windowsHost() : null;
   return new Promise(resolve => {
-    execFile(file, args, { timeout: timeoutMs, windowsHide: true, encoding: 'utf8', env: { ...process.env, LC_ALL: 'C', LANG: 'C' }, maxBuffer: 32 * 1024 * 1024 },
+    execFile(host ? (file === 'powershell.exe' ? host.executable : join(host.cwd, file)) : file, args,
+      { timeout: timeoutMs, windowsHide: true, encoding: 'utf8', cwd: host?.cwd,
+        env: host?.env ?? { ...process.env, LC_ALL: 'C', LANG: 'C' }, maxBuffer: 32 * 1024 * 1024 },
       (error, stdout) => resolve({ code: error ? (typeof (error as { code?: unknown }).code === 'number' ? (error as { code: number }).code : 1) : 0, stdout: String(stdout ?? '') }));
   });
 }
@@ -164,7 +170,7 @@ export async function probeOwner(value: unknown): Promise<OwnerState> {
 
 // ---- run registry -------------------------------------------------------------------------------------------
 
-type RegistryRecord = { schemaVersion: 1; jobName: string; platform: ProcessIdentity['platform']; pid: number; start: string | null; state: 'running' | 'empty' | 'unverified'; updatedAt: string; containment?: 'windows-job-v1' };
+type RegistryRecord = { schemaVersion: 1; jobName: string; platform: ProcessIdentity['platform']; pid: number; start: string | null; state: 'running' | 'empty' | 'unverified'; updatedAt: string; containment?: 'windows-job-v1'; terminalAcknowledged?: boolean };
 
 /** Where run records live: AGENT_CONTEXT_BROKER_CONTAINMENT_DIR, else a folder in the system temp directory. */
 export function registryDir(): string {
@@ -186,7 +192,7 @@ function writeRecord(record: RegistryRecord, fresh = false): void {
   const path = recordPath(record.jobName);
   if (fresh) {
     // A label in use is rejected; `wx` makes the claim atomic.
-    writeFileSync(path, `${JSON.stringify(record)}\n`, { flag: 'wx' });
+    writeFileSync(path, `${JSON.stringify(record)}\n`, { flag: 'wx', flush: true });
     return;
   }
   const temp = `${path}.${process.pid}.tmp`;
@@ -235,23 +241,22 @@ function prepare(options: ContainedOptions) {
 
 /** Run one command contained. No shell; the environment is exactly `env`. */
 export async function runContained(options: ContainedOptions): Promise<ContainedResult> {
+  const deadlineUnixMs = Date.now() + options.timeoutMs;
   check(supported(), WINDOWS ? 'windows-x64-required' : 'platform-unsupported');
   const config = prepare(options);
   if (WINDOWS) {
     check(windowsLauncherAvailable(), 'windows-containment-unavailable');
     const owner = await processSnapshot(process.pid);
     check(owner.state === 'alive' && owner.start, 'windows-owner-identity-unavailable');
-    let pid = 0;
     const record = (state: RegistryRecord['state'], fresh = false) => {
-      if (config.jobName) writeRecord({ schemaVersion: 1, jobName: config.jobName, platform: 'windows', pid,
+      if (config.jobName) writeRecord({ schemaVersion: 1, jobName: config.jobName, platform: 'windows', pid: 0,
         start: null, state, containment: 'windows-job-v1', updatedAt: new Date().toISOString() }, fresh);
     };
     const { input, jobName, ...launch } = config;
     return runWindowsContained({ ...launch, stdin: input, jobName: jobName ?? undefined }, { pid: process.pid, creationFiletime: owner.start }, {
       claim: () => { try { record('running', true); } catch { throw new Error('job-name-already-exists'); } },
-      started: value => { pid = value; record('running'); },
-      finished: empty => record(empty === true ? 'empty' : 'unverified'),
-    });
+      finished: () => { /* Only the helper can persist terminal accounting evidence. */ },
+    }, { registryPath: config.jobName ? recordPath(config.jobName) : undefined, deadlineUnixMs });
   }
   if (config.jobName) {
     try { writeRecord({ schemaVersion: 1, jobName: config.jobName, platform: platformName(), pid: 0, start: null, state: 'running', updatedAt: new Date().toISOString() }, true); }
@@ -329,16 +334,27 @@ export async function runContained(options: ContainedOptions): Promise<Contained
   };
 }
 
-/** State of a run by its label. Absent is NOT empty or completion proof. */
+/** A live helper can still populate an empty job. Validate its exact identity first. */
+export async function probeWindowsRecord(record: Pick<RegistryRecord, 'pid' | 'start' | 'state' | 'terminalAcknowledged'>,
+  snapshot: (pid: number) => Promise<Snapshot>, job: () => Promise<'active' | 'empty' | 'unknown'>): Promise<NamedJobState> {
+  if (record.state === 'empty' && record.terminalAcknowledged === true) return 'empty';
+  if (!Number.isInteger(record.pid) || record.pid <= 0 || typeof record.start !== 'string' || !/^[1-9][0-9]{0,19}$/.test(record.start)) return 'unknown';
+  const helper = await snapshot(record.pid);
+  const ended = helper.state === 'dead' || (helper.state === 'alive' && helper.start !== null && helper.start !== record.start);
+  const state = await job();
+  return state === 'empty' && !ended ? 'unknown' : state;
+}
+
+/** State of a run by its label. Missing records never provide completion proof. */
 export async function probeNamedJob(name: unknown): Promise<NamedJobState> {
   if (!supported() || typeof name !== 'string' || !JOB_NAME.test(name)) return 'unknown';
   try {
-    if (!existsSync(recordPath(name))) return 'absent';
+    if (!existsSync(recordPath(name))) return 'unknown';
     const record = readRecord(name);
     if (!record || record.platform !== platformName()) return 'unknown';
     if (WINDOWS) {
       if (record.containment !== 'windows-job-v1') return 'unknown';
-      return record.state === 'empty' ? 'empty' : await probeWindowsJob(name);
+      return await probeWindowsRecord(record, processSnapshot, () => probeWindowsJob(name));
     }
     if (record.state === 'empty') return 'empty';
     if (!record.pid) return 'unknown';

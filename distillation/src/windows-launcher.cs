@@ -1,10 +1,13 @@
 // Compiled for each invocation. Only this helper touches the binary transport.
+// Process lifetime and exact environment for cooperative children. Same-user debug
+// privileges, code injection, and broker-file tampering are outside this guarantee.
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Security.Principal;
 using System.Text;
 using System.Threading;
 using System.Web.Script.Serialization;
@@ -16,7 +19,8 @@ public sealed class ContainedLauncher
     static readonly UTF8Encoding Utf8 = new UTF8Encoding(false, true);
     public sealed class Owner { public int pid; public string creationFiletime; }
     public sealed class Config {
-        public string executable, cwd, jobName;
+        public string executable, cwd, jobName, registryPath;
+        public long deadlineUnixMs;
         public string[] args;
         public Dictionary<string, string> env;
         public int timeoutMs, maxOutputBytes;
@@ -40,7 +44,9 @@ public sealed class ContainedLauncher
         public long userTime, kernelTime, periodUser, periodKernel;
         public uint faults, total, active, terminated;
     }
-    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)] static extern IntPtr CreateJobObjectW(IntPtr attributes, string name);
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)] static extern IntPtr CreateJobObjectW(ref Security attributes, string name);
+    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)] static extern bool ConvertStringSecurityDescriptorToSecurityDescriptorW(string text, uint revision, out IntPtr descriptor, out uint size);
+    [DllImport("kernel32.dll")] static extern IntPtr LocalFree(IntPtr memory);
     [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)] static extern IntPtr OpenJobObjectW(uint access, bool inherit, string name);
     [DllImport("kernel32.dll", SetLastError = true)] static extern bool SetInformationJobObject(IntPtr job, int kind, ref ExtendedLimit limits, uint size);
     [DllImport("kernel32.dll", SetLastError = true)] static extern bool QueryInformationJobObject(IntPtr job, int kind, out Accounting value, uint size, IntPtr length);
@@ -159,6 +165,24 @@ public sealed class ContainedLauncher
         thread.IsBackground = true; thread.Start(); return thread;
     }
     static bool OwnerAlive(IntPtr owner) { return WaitForSingleObject(owner, 0) == WaitTimeout; }
+    void Record(bool terminal, object empty) {
+        if (String.IsNullOrEmpty(config.registryPath)) return;
+        using (Process self = Process.GetCurrentProcess()) {
+            var record = new { schemaVersion = 1, jobName = config.jobName, platform = "windows", pid = self.Id,
+                start = self.StartTime.ToFileTimeUtc().ToString(System.Globalization.CultureInfo.InvariantCulture),
+                state = terminal ? (Object.Equals(empty, true) ? "empty" : "unverified") : "running",
+                terminalAcknowledged = terminal, containment = "windows-job-v1", updatedAt = DateTime.UtcNow.ToString("o") };
+            string temporary = config.registryPath + "." + self.Id + ".tmp";
+            try {
+                byte[] bytes = Utf8.GetBytes(json.Serialize(record) + "\n");
+                using (FileStream file = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None)) {
+                    file.Write(bytes, 0, bytes.Length); file.Flush(true);
+                }
+                // The parent must have claimed the label; missing evidence fails closed.
+                File.Replace(temporary, config.registryPath, null);
+            } finally { if (File.Exists(temporary)) File.Delete(temporary); }
+        }
+    }
     void Execute(double compileMs) {
         IntPtr owner = IntPtr.Zero, stdinRead = IntPtr.Zero, stdinWrite = IntPtr.Zero;
         IntPtr stdoutRead = IntPtr.Zero, stdoutWrite = IntPtr.Zero, stderrRead = IntPtr.Zero, stderrWrite = IntPtr.Zero;
@@ -167,11 +191,15 @@ public sealed class ContainedLauncher
         object empty = "unknown"; string failure = null;
         ProcessInfo process = new ProcessInfo(); uint exitCode = 1;
         Thread outPump = null, errPump = null;
-        Stopwatch elapsed = Stopwatch.StartNew();
+        Stopwatch elapsed = new Stopwatch(), budget = new Stopwatch();
+        long remainingMs = 0;
         try {
             byte kind; byte[] frame = ReadFrame(out kind); Require(kind == 1, "config-first-required");
             config = json.Deserialize<Config>(Utf8.GetString(frame));
             Require(config != null && config.owner != null && config.owner.pid > 0, "invalid-owner");
+            remainingMs = config.deadlineUnixMs - DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            budget.Start();
+            Require(config.deadlineUnixMs > 0, "invalid-deadline");
             Require(config.timeoutMs > 0 && config.timeoutMs <= 1800000 && config.maxOutputBytes > 0 && config.maxOutputBytes <= 16 * 1024 * 1024, "invalid-limits");
             Require(Path.IsPathRooted(config.executable) && Path.IsPathRooted(config.cwd) && config.args != null && config.env != null, "invalid-config");
             owner = OpenProcess(0x100000 | 0x1000, false, config.owner.pid);
@@ -179,10 +207,20 @@ public sealed class ContainedLauncher
             long created, exited, kernel, user;
             Native(GetProcessTimes(owner, out created, out exited, out kernel, out user), "owner-identity-failed");
             Require(created.ToString(System.Globalization.CultureInfo.InvariantCulture) == config.owner.creationFiletime && OwnerAlive(owner), "owner-identity-mismatch");
-            job = CreateJobObjectW(IntPtr.Zero, config.jobName);
-            int jobError = Marshal.GetLastWin32Error();
-            Native(job != IntPtr.Zero, "job-create-failed");
-            if (jobError == 183) { Close(ref job); throw new InvalidOperationException("job-already-exists"); }
+            // Persist this helper's identity before an empty job can become observable.
+            Record(false, "unknown");
+            IntPtr descriptor;
+            uint descriptorSize;
+            // OWNER RIGHTS suppresses implicit WRITE_DAC; the only granted job right is QUERY.
+            string sid = WindowsIdentity.GetCurrent().User.Value;
+            Native(ConvertStringSecurityDescriptorToSecurityDescriptorW("D:P(A;;0x4;;;" + sid + ")(A;;0x4;;;OW)", 1, out descriptor, out descriptorSize), "job-security-failed");
+            try {
+                Security jobSecurity = new Security { length = Marshal.SizeOf(typeof(Security)), descriptor = descriptor };
+                job = CreateJobObjectW(ref jobSecurity, config.jobName);
+                int jobError = Marshal.GetLastWin32Error();
+                Native(job != IntPtr.Zero, "job-create-failed");
+                if (jobError == 183) { Close(ref job); throw new InvalidOperationException("job-already-exists"); }
+            } finally { LocalFree(descriptor); }
             ExtendedLimit limits = new ExtendedLimit(); limits.basic.flags = KillOnClose;
             Native(SetInformationJobObject(job, 9, ref limits, (uint)Marshal.SizeOf(typeof(ExtendedLimit))), "job-limits-failed");
             Security security = new Security { length = Marshal.SizeOf(typeof(Security)), inherit = 1 };
@@ -215,14 +253,16 @@ public sealed class ContainedLauncher
             StartupEx startup = new StartupEx(); startup.info.cb = Marshal.SizeOf(typeof(StartupEx));
             startup.info.flags = 0x100; startup.info.stdin = stdinRead; startup.info.stdout = stdoutWrite; startup.info.stderr = stderrWrite; startup.attributes = attributes;
             // Job membership is atomic with creation; the child never runs outside the job.
+            if (budget.ElapsedMilliseconds >= remainingMs) { timedOut = true; throw new InvalidOperationException("deadline-before-launch"); }
+            Require(OwnerAlive(owner), "owner-ended-before-launch");
             Native(CreateProcessW(config.executable, command, IntPtr.Zero, IntPtr.Zero, true, 0x80000 | 0x400 | 0x8000000, environment, config.cwd, ref startup, out process), "create-process-failed");
             Close(ref process.thread); Close(ref stdinRead); Close(ref stdoutWrite); Close(ref stderrWrite);
-            elapsed.Restart();
+            elapsed.Start();
             outPump = PumpOutput(stdoutRead, 4); errPump = PumpOutput(stderrRead, 5);
             PumpInput(stdinWrite); stdinWrite = IntPtr.Zero; // ownership transfers to the input thread
             while (WaitForSingleObject(process.process, 10) == WaitTimeout) {
                 if (!OwnerAlive(owner)) { ownerLost = true; break; }
-                if (elapsed.ElapsedMilliseconds >= config.timeoutMs) { timedOut = true; break; }
+                if (budget.ElapsedMilliseconds >= remainingMs) { timedOut = true; break; }
                 if (overflow || transportFailed) break;
             }
         } catch (Exception error) {
@@ -230,31 +270,36 @@ public sealed class ContainedLauncher
             Win32Exception native = error as Win32Exception;
             failure = native == null ? error.Message : error.Message + ":" + native.NativeErrorCode;
         } finally {
+            Stopwatch cleanup = Stopwatch.StartNew();
             if (job != IntPtr.Zero) {
                 Stop();
-                Stopwatch cleanup = Stopwatch.StartNew();
                 try {
                     while (Active(job) != 0 && cleanup.ElapsedMilliseconds < CleanupMs) Thread.Sleep(10);
                     empty = Active(job) == 0 ? (object)true : (object)false;
                 } catch { empty = "unknown"; }
             }
             if (process.process != IntPtr.Zero) {
-                if (WaitForSingleObject(process.process, CleanupMs) != 0 || !GetExitCodeProcess(process.process, out exitCode)) failure = failure ?? "exit-code-unavailable";
+                if (WaitForSingleObject(process.process, (uint)Math.Max(0, CleanupMs - cleanup.ElapsedMilliseconds)) != 0 || !GetExitCodeProcess(process.process, out exitCode)) failure = failure ?? "exit-code-unavailable";
             }
             if (!ownerLost) {
-                if (outPump != null && !outPump.Join(CleanupMs)) transportFailed = true;
-                if (errPump != null && !errPump.Join(CleanupMs)) transportFailed = true;
+                if (outPump != null && !outPump.Join((int)Math.Max(0, CleanupMs - cleanup.ElapsedMilliseconds))) transportFailed = true;
+                if (errPump != null && !errPump.Join((int)Math.Max(0, CleanupMs - cleanup.ElapsedMilliseconds))) transportFailed = true;
             }
             Close(ref job); Close(ref owner); Close(ref process.process); Close(ref process.thread);
             Close(ref stdinRead); Close(ref stdinWrite); Close(ref stdoutRead); Close(ref stdoutWrite); Close(ref stderrRead); Close(ref stderrWrite);
             if (attributesReady) DeleteProcThreadAttributeList(attributes);
             foreach (IntPtr allocation in new IntPtr[] { attributes, handles, jobs, environment }) if (allocation != IntPtr.Zero) Marshal.FreeHGlobal(allocation);
         }
+        // No path below this acknowledgement can launch another process.
+        if (config != null) {
+            try { Record(true, empty); }
+            catch { empty = "unknown"; failure = failure ?? "registry-acknowledgement-failed"; }
+        }
         // Node may have disappeared while a pump was blocked. Exit closes every handle.
         if (ownerLost || transportFailed) return;
         SendJson(6, new { containment = "windows-job-v1", containmentEmpty = empty, exitCode = exitCode,
             timedOut = timedOut, outputLimitExceeded = overflow, stdoutBytes = outBytes, stderrBytes = errBytes,
-            compileMs = compileMs, executionMs = elapsed.Elapsed.TotalMilliseconds, error = failure });
+            compileMs = compileMs, executionMs = elapsed.Elapsed.TotalMilliseconds, error = timedOut ? null : failure });
     }
     public static void Run(double compileMs) { new ContainedLauncher().Execute(compileMs); }
 }

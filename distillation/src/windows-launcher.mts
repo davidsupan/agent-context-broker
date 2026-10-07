@@ -2,22 +2,25 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { ContainedOptions, ContainedResult } from './containment.mts';
+import { windowsHost } from './windows-host.mts';
 
 const script = fileURLToPath(new URL('./windows-launcher.ps1', import.meta.url));
 const source = fileURLToPath(new URL('./windows-launcher.cs', import.meta.url));
 const FRAME_LIMIT = 1024 * 1024;
 const CHUNK_LIMIT = 65536;
-const HOST_GRACE_MS = 30000;
+const HOST_GRACE_MS = 5000;
 export const windowsLauncherAvailable = () => process.platform === 'win32' && process.arch === 'x64' && existsSync(script) && existsSync(source);
 const hostArgs = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script];
 
 export async function probeWindowsJob(name: string): Promise<'active' | 'empty' | 'unknown'> {
-  const child = spawn('powershell.exe', [...hostArgs, '-ProbeJob', name], { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
+  const host = windowsHost();
+  const child = spawn(host.executable, [...hostArgs, '-ProbeJob', name], { ...host, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
   let text = '';
   child.stdout.on('data', (chunk: Buffer) => { if (text.length < 100) text += chunk.toString('utf8'); });
-  const timer = setTimeout(() => child.kill(), HOST_GRACE_MS);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<void>(resolve => { timer = setTimeout(() => { child.kill(); child.stdout.destroy(); child.unref(); resolve(); }, HOST_GRACE_MS); });
   try {
-    await new Promise<void>(resolve => { child.once('error', () => resolve()); child.once('close', () => resolve()); });
+    await Promise.race([expired, new Promise<void>(resolve => { child.once('error', () => resolve()); child.once('close', () => resolve()); })]);
     return child.exitCode === 0 && (text.trim() === 'active' || text.trim() === 'empty') ? text.trim() as 'active' | 'empty' : 'unknown';
   } finally { clearTimeout(timer); child.stdout.destroy(); }
 }
@@ -29,16 +32,24 @@ type Status = {
 };
 type Lifecycle = {
   claim: () => void;
-  started: (pid: number) => void;
   finished: (empty: boolean | 'unknown') => void;
+};
+type Runtime = {
+  registryPath?: string;
+  deadlineUnixMs?: number;
+  /** Transport injection for deterministic shutdown tests. */
+  launch?: () => ChildProcessWithoutNullStreams;
+  shutdownGraceMs?: number;
 };
 
 /** Binary protocol: uint32 LE size (including type), one type byte, then payload.
  * 1 config, 2 stdin, 3 stdin EOF, 4 stdout, 5 stderr, 6 final status.
  * Only config/status are UTF-8 JSON. No text decoding occurs on the data frames.
  */
-export async function runWindowsContained(options: ContainedOptions, owner: { pid: number; creationFiletime: string }, lifecycle: Lifecycle): Promise<ContainedResult> {
+export async function runWindowsContained(options: ContainedOptions, owner: { pid: number; creationFiletime: string }, lifecycle: Lifecycle, runtime: Runtime = {}): Promise<ContainedResult> {
   const started = performance.now();
+  const deadlineUnixMs = runtime.deadlineUnixMs ?? Date.now() + options.timeoutMs;
+  const hardDeadline = started + Math.max(0, deadlineUnixMs - Date.now() + (runtime.shutdownGraceMs ?? HOST_GRACE_MS));
   let child: ChildProcessWithoutNullStreams | undefined;
   let closed: Promise<number | null> | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -47,13 +58,21 @@ export async function runWindowsContained(options: ContainedOptions, owner: { pi
   let hostExpired = false, hostError = false;
   const out: Buffer[] = [], err: Buffer[] = [];
   let outBytes = 0, errBytes = 0;
+  let expire!: () => void;
+  const expired = new Promise<null>(resolve => { expire = () => {
+    hostExpired = true;
+    if (child) { child.kill(); child.stdin.destroy(); child.stdout.destroy(); child.stderr.destroy(); child.unref(); }
+    resolve(null);
+  }; });
+  timer = setTimeout(expire, Math.max(0, hardDeadline - performance.now()));
   try {
-    if (!windowsLauncherAvailable()) throw new Error('windows-containment-unavailable');
+    if (!runtime.launch && !windowsLauncherAvailable()) throw new Error('windows-containment-unavailable');
     const { stdin, ...config } = options;
-    const configBytes = Buffer.from(JSON.stringify({ ...config, owner }), 'utf8');
+    const configBytes = Buffer.from(JSON.stringify({ ...config, owner, deadlineUnixMs, registryPath: runtime.registryPath }), 'utf8');
     if (configBytes.length >= FRAME_LIMIT) throw new Error('windows-config-limit');
     lifecycle.claim(); claimed = true;
-    child = spawn('powershell.exe', hostArgs, { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    const hostConfig = runtime.launch ? null : windowsHost();
+    child = runtime.launch ? runtime.launch() : spawn(hostConfig!.executable, hostArgs, { ...hostConfig!, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
     const host = child;
     closed = new Promise(resolve => host.once('close', code => resolve(code)));
     host.on('error', () => { hostError = true; });
@@ -61,7 +80,6 @@ export async function runWindowsContained(options: ContainedOptions, owner: { pi
     // Bound and discard host diagnostics; they must never become child stderr.
     let diagnostics = 0;
     host.stderr.on('data', (chunk: Buffer) => { diagnostics += chunk.length; if (diagnostics > 65536) host.kill(); });
-    timer = setTimeout(() => { hostExpired = true; host.kill(); }, options.timeoutMs + HOST_GRACE_MS);
     const write = (kind: number, bytes: Buffer) => new Promise<void>((resolve, reject) => {
       const header = Buffer.allocUnsafe(5); header.writeUInt32LE(bytes.length + 1); header[4] = kind;
       // Await each write's callback: at most one bounded frame is queued.
@@ -105,10 +123,14 @@ export async function runWindowsContained(options: ContainedOptions, owner: { pi
     })();
     // Attach rejection handling now, including registration failures.
     const received = receiving.then(() => null, (error: unknown) => { host.kill(); return error; });
-    lifecycle.started(host.pid ?? 0);
-    const protocolError = await received;
-    const code = await closed;
-    await sending;
+    const completed = await Promise.race([Promise.all([received, closed, sending]), expired]);
+    if (!completed || hostExpired) {
+      return { stdout: Buffer.concat(out).toString('utf8'), stderr: Buffer.concat(err).toString('utf8'),
+        stdoutBuffer: Buffer.concat(out), stderrBuffer: Buffer.concat(err), stdoutBytes: outBytes, stderrBytes: errBytes,
+        exitCode: 1, containment: 'windows-job-v1', containmentEmpty: 'unknown', timedOut: true,
+        outputLimitExceeded: false, durationMs: performance.now() - started };
+    }
+    const [protocolError, code] = completed;
     if (protocolError) throw protocolError;
     if (hostExpired || hostError || code !== 0 || !status) throw new Error('windows-launcher-failed:containment-unknown');
     cleanup = status.containmentEmpty;
@@ -119,12 +141,12 @@ export async function runWindowsContained(options: ContainedOptions, owner: { pi
       containmentEmpty: status.containmentEmpty, timedOut: status.timedOut, outputLimitExceeded: status.outputLimitExceeded,
       durationMs: performance.now() - started, startupMs: performance.now() - started - status.executionMs, compileMs: status.compileMs };
   } finally {
-    if (timer) clearTimeout(timer);
     if (child) {
       if (child.exitCode === null) child.kill(); // closing the helper's last job handle kills its tree
       child.stdin.destroy(); child.stdout.destroy(); child.stderr.destroy();
-      if (closed) await closed;
+      if (closed) await Promise.race([closed, expired]);
     }
+    if (timer) clearTimeout(timer);
     if (claimed) lifecycle.finished(cleanup);
   }
 }
