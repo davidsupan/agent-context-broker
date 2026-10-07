@@ -145,7 +145,7 @@ export function markDispatch(db: Database, token: string) {
 export function status(db: Database, now = Date.now() / 1000): StoreStatus {
   const { day } = moment(now);
   const tables = new Set(ColumnRowsSchema.parse(db.query("SELECT name FROM sqlite_master WHERE type='table'").all()).map(r => r.name));
-  const result: StoreStatus = { schemaVersion: 1, runtime: 'bun', utcDay: day, dailyLimitSeconds: dailyBudgetLimit(db),
+  const result: StoreStatus = { schemaVersion: 1, runtime: 'node', utcDay: day, dailyLimitSeconds: dailyBudgetLimit(db),
     reservedSeconds: 0, fullyCurrent: false, productionEnabled: false,
     acceptedState: 'not-observed',
     boundary: 'Queue metadata only; not live-source, model or broker verification' };

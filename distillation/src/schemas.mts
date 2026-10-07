@@ -44,7 +44,7 @@ export const ColumnRowsSchema = z.array(z.object({ name: z.string() }));
 export const CountRowsSchema = z.array(z.object({ state: z.string(), n: z.number().int().nonnegative() }));
 export const StatusSchema = z.strictObject({
   schemaVersion: z.literal(1),
-  runtime: z.literal('bun'),
+  runtime: z.literal('node'),
   utcDay: z.iso.date(),
   dailyLimitSeconds: DailySeconds,
   reservedSeconds: z.number().int().min(0).max(7200),

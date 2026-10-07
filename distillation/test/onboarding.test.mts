@@ -115,7 +115,12 @@ test('resolution uses explicit override, then injected user directory, then inst
   rmSync(f.executable); assert.equal((await resolveClaudeCli(undefined, f.context)).path, second);
   await assert.rejects(resolveClaudeCli(join(f.root, 'missing.exe'), f.context), /provider-cli-not-found/);
   const mac = fixture('darwin'); assert.equal((await resolveClaudeCli(undefined, mac.context)).path, mac.executable);
-  assert.deepEqual(claudeCliCandidates(undefined, mac.context), [mac.executable, '/opt/homebrew/bin/claude', '/usr/local/bin/claude']);
+  // The native installer's locations come first; a global npm install's executable is the fallback.
+  assert.deepEqual(claudeCliCandidates(undefined, mac.context).slice(0, 3), [mac.executable, '/opt/homebrew/bin/claude', '/usr/local/bin/claude']);
+  const forward = (path: string) => path.replaceAll(String.fromCharCode(92), '/');
+  assert.ok(claudeCliCandidates(undefined, mac.context).slice(3).every((path) => forward(path).endsWith('@anthropic-ai/claude-code/bin/claude')));
+  const windows = claudeCliCandidates(undefined, { platform: 'win32', env: { APPDATA: 'C:/Users/x/AppData/Roaming' } });
+  assert.ok(forward(windows.at(-1)!).endsWith('npm/node_modules/@anthropic-ai/claude-code/bin/claude.exe'));
   assert.deepEqual(claudeCliCandidates(second, f.context), [second]);
 });
 

@@ -53,6 +53,12 @@ function main() {
   const staged = { ...manifest };
   delete staged.devDependencies;
   writeFileSync(join(stage, 'package.json'), `${JSON.stringify(staged, null, 2)}\n`);
+  // Bundled runtime dependencies travel inside the package (npm pack includes them from node_modules).
+  for (const dependency of manifest.bundleDependencies ?? []) {
+    const from = join(root, 'node_modules', dependency);
+    if (!existsSync(join(from, 'package.json'))) throw new Error(`Bundled dependency ${dependency} is not installed; run npm ci first.`);
+    cpSync(from, join(stage, 'node_modules', dependency), { recursive: true });
+  }
 
   let stripped = 0;
   let rewritten = 0;

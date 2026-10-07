@@ -25,8 +25,11 @@ import { assertSupportedRuntime, inspectInstalledRuntime, runtimeInfo } from './
 
 export const MINIMUM_BUN_VERSION = '1.4.0';
 
+// The distillation module and the one runtime dependency it bundles (zod) are part of the installed tool.
 const PAYLOAD_DIRECTORIES = Object.freeze([
   'adapters',
+  'distillation',
+  'node_modules/zod',
   'docs',
   'examples',
   'fixtures',
