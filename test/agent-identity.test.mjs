@@ -9,10 +9,10 @@ import {
   agentDescriptorFromEnvironment,
   isStoredAgentDescriptor,
   normalizeAgentDescriptor
-} from '../src/agent-identity.mjs';
+} from '../src/agent-identity.mts';
 import { sha256, verifyEventStore } from '../src/event-store.mjs';
 import { planPeerProgressPublication, publishPeerProgress, readPeerProgress } from '../src/peer-progress.mjs';
-import { attestSource, planSourceAttestation } from '../src/source-attestation.mjs';
+import { attestSource, planSourceAttestation } from '../src/source-attestation.mts';
 
 const roots = [];
 

@@ -4,6 +4,15 @@ import { randomUUID } from 'node:crypto';
 
 import { sha256, stableJson, verifyEventStore } from './event-store.mjs';
 
+export type ReadModelOptions = { strictIsolation?: boolean; runtimeRoot?: string; outputRoot?: string; execute?: boolean; [key: string]: unknown };
+export type ReadModelPlan = { schemaVersion: number; mode: string; strictIsolation: boolean; reads?: number; writes?: number; writesEnabled?: boolean; outputRoot?: string };
+export type ReadModelManifest = { schemaVersion: number; sourceSequence: number; sourceEventId: string | null; sourceHeadHash: string | null; projectedThroughAt: string | null; nodeCount: number; edgeCount: number; nodesHash: string; edgesHash: string; indexesHash: string; projectionHash: string; unchanged: boolean; writes: number };
+export type ReadModelResult = ReadModelPlan | ReadModelManifest;
+type ProjectionEvent = { eventType: string; confidence: number | null; approvalState: string; redactionResult: string; payloadHash: string; freshness: { status: string }; provider: string; sensitivity: string; sequence: number; eventId: string; subjectRef: string; sourceRefs: string[]; evidenceRefs: string[]; replacesRef: string | null };
+type ProjectionNode = { schemaVersion: number; id: string; kind: string; status: string; freshness: string; provider: string; sensitivity: string; latestSequence: number; latestEventId: string; attributesHash: string };
+type ProjectionEdge = { schemaVersion: number; id: string; from: string; to: string; kind: string; sequence: number; eventId: string };
+type ProjectionIndexes = { provider: Record<string, string[]>; status: Record<string, string[]>; freshness: Record<string, string[]> };
+
 const STATUS_BY_EVENT = Object.freeze({
   'source.inventoryed': 'observed',
   'thread.delta': 'observed',
@@ -20,7 +29,7 @@ const STATUS_BY_EVENT = Object.freeze({
   'read-model.projected': 'observed'
 });
 
-function atomicWrite(path, value) {
+function atomicWrite(path: string, value: string): void {
   mkdirSync(dirname(path), { recursive: true });
   const temporary = join(dirname(path), `.${basename(path)}.${process.pid}.${randomUUID()}.tmp`);
   try {
@@ -31,15 +40,15 @@ function atomicWrite(path, value) {
   }
 }
 
-function writeJson(path, value) {
+function writeJson(path: string, value: unknown): void {
   atomicWrite(path, `${JSON.stringify(value, null, 2)}\n`);
 }
 
-function kindOf(reference) {
+function kindOf(reference: string): string {
   return reference.slice('acb://'.length).split('/')[0];
 }
 
-function nodeFor(reference, event) {
+function nodeFor(reference: string, event: ProjectionEvent): ProjectionNode {
   const attributes = {
     eventType: event.eventType,
     confidence: event.confidence,
@@ -51,7 +60,7 @@ function nodeFor(reference, event) {
     schemaVersion: 1,
     id: reference,
     kind: kindOf(reference),
-    status: STATUS_BY_EVENT[event.eventType],
+    status: (STATUS_BY_EVENT as Record<string, string>)[event.eventType],
     freshness: event.freshness.status,
     provider: event.provider,
     sensitivity: event.sensitivity,
@@ -61,7 +70,7 @@ function nodeFor(reference, event) {
   };
 }
 
-function referenceNode(reference, event) {
+function referenceNode(reference: string, event: ProjectionEvent): ProjectionNode {
   return {
     schemaVersion: 1,
     id: reference,
@@ -76,19 +85,19 @@ function referenceNode(reference, event) {
   };
 }
 
-function edge(from, to, kind, event) {
+function edge(from: string, to: string, kind: string, event: ProjectionEvent): ProjectionEdge {
   const core = { from, to, kind, sequence: event.sequence, eventId: event.eventId };
   return { schemaVersion: 1, id: sha256(stableJson(core)), ...core };
 }
 
-function addIndex(index, key, value) {
+function addIndex(index: Record<string, string[]>, key: string, value: string): void {
   index[key] ??= [];
   if (!index[key].includes(value)) index[key].push(value);
 }
 
-function projection(events) {
-  const nodes = new Map();
-  const edges = [];
+function projection(events: ProjectionEvent[]): { nodes: ProjectionNode[]; edges: ProjectionEdge[]; indexes: ProjectionIndexes } {
+  const nodes = new Map<string, ProjectionNode>();
+  const edges: ProjectionEdge[] = [];
   for (const event of events) {
     nodes.set(event.subjectRef, nodeFor(event.subjectRef, event));
     for (const sourceRef of event.sourceRefs) {
@@ -106,7 +115,7 @@ function projection(events) {
   }
   const orderedNodes = [...nodes.values()].sort((left, right) => left.id.localeCompare(right.id));
   const orderedEdges = edges.sort((left, right) => left.id.localeCompare(right.id));
-  const indexes = { provider: {}, status: {}, freshness: {} };
+  const indexes: ProjectionIndexes = { provider: {}, status: {}, freshness: {} };
   for (const node of orderedNodes) {
     addIndex(indexes.provider, node.provider, node.id);
     addIndex(indexes.status, node.status, node.id);
@@ -118,11 +127,11 @@ function projection(events) {
   return { nodes: orderedNodes, edges: orderedEdges, indexes };
 }
 
-function contentLines(items) {
+function contentLines(items: unknown[]): string {
   return items.map((item) => stableJson(item)).join('\n') + (items.length ? '\n' : '');
 }
 
-function verifiedExisting(outputRoot, manifest) {
+function verifiedExisting(outputRoot: string, manifest: ReadModelManifest | null): boolean {
   if (!manifest) return false;
   const nodesPath = join(outputRoot, 'nodes.jsonl');
   const edgesPath = join(outputRoot, 'edges.jsonl');
@@ -133,7 +142,7 @@ function verifiedExisting(outputRoot, manifest) {
     sha256(readFileSync(indexesPath, 'utf8')) === manifest.indexesHash;
 }
 
-export function planReadModel(inputOptions = {}) {
+export function planReadModel(inputOptions: ReadModelOptions = {}): ReadModelPlan {
   if (inputOptions.strictIsolation) {
     return { schemaVersion: 1, mode: 'read-model', strictIsolation: true, reads: 0, writes: 0 };
   }
@@ -148,7 +157,7 @@ export function planReadModel(inputOptions = {}) {
   };
 }
 
-export function projectReadModel(inputOptions = {}) {
+export function projectReadModel(inputOptions: ReadModelOptions = {}): ReadModelResult {
   if (inputOptions.strictIsolation) {
     return { schemaVersion: 1, mode: 'read-model', strictIsolation: true, reads: 0, writes: 0 };
   }
@@ -160,9 +169,11 @@ export function projectReadModel(inputOptions = {}) {
     join(runtimeRoot, 'read-model');
   const verified = verifyEventStore({ runtimeRoot });
   const currentManifestPath = join(outputRoot, 'manifest.json');
-  const currentManifest = existsSync(currentManifestPath)
+  const parsedManifest: unknown = existsSync(currentManifestPath)
     ? JSON.parse(readFileSync(currentManifestPath, 'utf8'))
     : null;
+  const currentManifest = parsedManifest !== null && typeof parsedManifest === 'object'
+    ? parsedManifest as ReadModelManifest : null;
   if (currentManifest?.sourceHeadHash === verified.head.headHash &&
       verifiedExisting(outputRoot, currentManifest)) {
     return { ...currentManifest, unchanged: true, writes: 0 };

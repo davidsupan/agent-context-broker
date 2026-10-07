@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, test } from 'node:test';
 
-import { reviewLedgerContext } from '../src/work-ledgers.mjs';
+import { reviewLedgerContext } from '../src/work-ledgers.mts';
 
 const roots = [];
 

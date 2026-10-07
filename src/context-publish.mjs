@@ -5,8 +5,8 @@ import {
   reconcileClaimBatch
 } from './reconciliation.mjs';
 import { assertPublishable } from './provider-policy.mjs';
-import { provenanceForSourceToken } from './source-attestation.mjs';
-import { relationsForScope } from './work-ledgers.mjs';
+import { provenanceForSourceToken } from './source-attestation.mts';
+import { relationsForScope } from './work-ledgers.mts';
 
 const CLAIM_FIELDS = new Set([
   'claimKey', 'claimType', 'subject', 'predicate', 'value', 'observedAt',

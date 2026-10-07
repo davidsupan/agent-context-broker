@@ -14,7 +14,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { normalizeAgentDescriptor } from '../src/agent-identity.mjs';
+import { normalizeAgentDescriptor } from '../src/agent-identity.mts';
 import { planReconciliation, reconcileClaimBatch } from '../src/reconciliation.mjs';
 
 function parseArgs(argv) {

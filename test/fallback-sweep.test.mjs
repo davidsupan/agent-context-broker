@@ -6,7 +6,7 @@ import { dirname, join, resolve } from 'node:path';
 import { afterEach, describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { planFallbackSweep, runFallbackSweep } from '../src/fallback-sweep.mjs';
+import { planFallbackSweep, runFallbackSweep } from '../src/fallback-sweep.mts';
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const temporaryRoots = [];

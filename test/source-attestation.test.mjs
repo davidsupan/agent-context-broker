@@ -11,7 +11,7 @@ import {
   isSourceAttested,
   planSourceAttestation,
   provenanceForSourceToken
-} from '../src/source-attestation.mjs';
+} from '../src/source-attestation.mts';
 
 const roots = [];
 

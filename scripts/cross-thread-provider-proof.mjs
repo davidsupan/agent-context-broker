@@ -8,7 +8,7 @@ import { join } from 'node:path';
 
 import { planContextQuery, runContextQuery } from '../src/context-query.mjs';
 import { publishContext } from '../src/context-publish.mjs';
-import { attestSource, planSourceAttestation } from '../src/source-attestation.mjs';
+import { attestSource, planSourceAttestation } from '../src/source-attestation.mts';
 
 function hash(value) {
   return createHash('sha256').update(String(value), 'utf8').digest('hex');

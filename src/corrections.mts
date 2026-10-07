@@ -5,6 +5,15 @@ import {
   verifyEventStore
 } from './event-store.mjs';
 
+export type CorrectionScope = { kind: string; keyHash: string };
+export type CorrectionProposal = { schemaVersion: 1; proposalKey: string; targetRef: string; targetRevisionHash: string; correctionKind: string; disposition: string; replacementHash: string | null; evidenceRefs: string[]; confidence: number; scope: CorrectionScope; requestedBy: 'codex' | 'claude-code'; approvalClass: string; sensitivity: 'shared' | 'private'; occurredAt: string };
+export type CorrectionDecision = { schemaVersion: 1; correctionRef: string; expectedProposalEventId: string; decision: 'accept' | 'reject'; observedRevisionHash: string; evidenceRefs: string[]; decidedBy: 'codex' | 'claude-code'; occurredAt: string };
+export type CorrectionProposalOptions = { proposal?: unknown; execute?: boolean; runtimeRoot?: string };
+export type CorrectionDecisionOptions = { decision?: unknown; execute?: boolean; runtimeRoot?: string };
+export type CorrectionProposalPlan = { schemaVersion: number; mode: string; writesEnabled: boolean; correctionRef: string; targetRevisionHash: string; replacementHash: string | null };
+export type CorrectionProposalResult = { schemaVersion: number; mode: string; correctionRef: string; proposalEventId: string; idempotentReplay: boolean };
+export type CorrectionDecisionPlan = { schemaVersion: number; mode: string; writesEnabled: boolean; correctionRef: string; decision: string; proposalEventId: string; decisionEventId?: string; idempotentReplay?: boolean };
+
 const HASH = /^[a-f0-9]{64}$/u;
 const REFERENCE = /^acb:\/\/[a-z][a-z0-9-]*\/[a-f0-9]{64}$/u;
 const PROPOSAL_FIELDS = new Set([
@@ -18,58 +27,60 @@ const DECISION_FIELDS = new Set([
   'observedRevisionHash', 'evidenceRefs', 'decidedBy', 'occurredAt'
 ]);
 
-function isRecord(value) {
+function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-function validRefs(value) {
+function validRefs(value: unknown): value is string[] {
   return Array.isArray(value) && value.length > 0 &&
-    new Set(value).size === value.length && value.every((item) => REFERENCE.test(item));
+    new Set(value).size === value.length && value.every((item) => REFERENCE.test(item as string));
 }
 
-function validScope(value) {
+function validScope(value: unknown): value is CorrectionScope {
   return isRecord(value) && Object.keys(value).length === 2 &&
-    ['global', 'project', 'workstream', 'ticket', 'merge-request'].includes(value.kind) &&
-    HASH.test(value.keyHash ?? '');
+    ['global', 'project', 'workstream', 'ticket', 'merge-request'].includes(value.kind as string) &&
+    HASH.test((value.keyHash ?? '') as string);
 }
 
-function validateProposal(proposal) {
+function validateProposal(proposal: unknown): asserts proposal is CorrectionProposal {
+  const p = proposal as CorrectionProposal;
   if (!isRecord(proposal) || Object.keys(proposal).length !== PROPOSAL_FIELDS.size ||
       Object.keys(proposal).some((key) => !PROPOSAL_FIELDS.has(key)) ||
-      proposal.schemaVersion !== 1 || !HASH.test(proposal.proposalKey ?? '') ||
-      !REFERENCE.test(proposal.targetRef ?? '') ||
-      !HASH.test(proposal.targetRevisionHash ?? '') ||
-      !['finding', 'guidance', 'claim'].includes(proposal.correctionKind) ||
-      !['replace', 'withdraw', 'refresh'].includes(proposal.disposition) ||
-      !(proposal.replacementHash === null || HASH.test(proposal.replacementHash ?? '')) ||
-      (proposal.disposition !== 'withdraw' && proposal.replacementHash === null) ||
-      !validRefs(proposal.evidenceRefs) || typeof proposal.confidence !== 'number' ||
-      proposal.confidence < 0 || proposal.confidence > 1 || !validScope(proposal.scope) ||
-      !['codex', 'claude-code'].includes(proposal.requestedBy) ||
-      !['auto-private', 'owner-validated', 'explicit'].includes(proposal.approvalClass) ||
-      !['shared', 'private'].includes(proposal.sensitivity) ||
-      Number.isNaN(Date.parse(proposal.occurredAt)) ||
-      (proposal.approvalClass === 'auto-private' && proposal.sensitivity !== 'private')) {
+      p.schemaVersion !== 1 || !HASH.test(p.proposalKey ?? '') ||
+      !REFERENCE.test(p.targetRef ?? '') ||
+      !HASH.test(p.targetRevisionHash ?? '') ||
+      !['finding', 'guidance', 'claim'].includes(p.correctionKind) ||
+      !['replace', 'withdraw', 'refresh'].includes(p.disposition) ||
+      !(p.replacementHash === null || HASH.test(p.replacementHash ?? '')) ||
+      (p.disposition !== 'withdraw' && p.replacementHash === null) ||
+      !validRefs(p.evidenceRefs) || typeof p.confidence !== 'number' ||
+      p.confidence < 0 || p.confidence > 1 || !validScope(p.scope) ||
+      !['codex', 'claude-code'].includes(p.requestedBy) ||
+      !['auto-private', 'owner-validated', 'explicit'].includes(p.approvalClass) ||
+      !['shared', 'private'].includes(p.sensitivity) ||
+      Number.isNaN(Date.parse(p.occurredAt)) ||
+      (p.approvalClass === 'auto-private' && p.sensitivity !== 'private')) {
     throw new Error('Correction proposal is invalid.');
   }
 }
 
-function validateDecision(decision) {
+function validateDecision(decision: unknown): asserts decision is CorrectionDecision {
+  const d = decision as CorrectionDecision;
   if (!isRecord(decision) || Object.keys(decision).length !== DECISION_FIELDS.size ||
       Object.keys(decision).some((key) => !DECISION_FIELDS.has(key)) ||
-      decision.schemaVersion !== 1 ||
-      !/^acb:\/\/correction\/[a-f0-9]{64}$/u.test(decision.correctionRef ?? '') ||
-      !HASH.test(decision.expectedProposalEventId ?? '') ||
-      !['accept', 'reject'].includes(decision.decision) ||
-      !HASH.test(decision.observedRevisionHash ?? '') ||
-      !validRefs(decision.evidenceRefs) ||
-      !['codex', 'claude-code'].includes(decision.decidedBy) ||
-      Number.isNaN(Date.parse(decision.occurredAt))) {
+      d.schemaVersion !== 1 ||
+      !/^acb:\/\/correction\/[a-f0-9]{64}$/u.test(d.correctionRef ?? '') ||
+      !HASH.test(d.expectedProposalEventId ?? '') ||
+      !['accept', 'reject'].includes(d.decision) ||
+      !HASH.test(d.observedRevisionHash ?? '') ||
+      !validRefs(d.evidenceRefs) ||
+      !['codex', 'claude-code'].includes(d.decidedBy) ||
+      Number.isNaN(Date.parse(d.occurredAt))) {
     throw new Error('Correction decision is invalid.');
   }
 }
 
-function proposalId(proposal) {
+function proposalId(proposal: CorrectionProposal): string {
   return sha256(stableJson({
     proposalKey: proposal.proposalKey,
     targetRef: proposal.targetRef,
@@ -81,7 +92,7 @@ function proposalId(proposal) {
   }));
 }
 
-function proposalEvent(proposal) {
+function proposalEvent(proposal: CorrectionProposal) {
   const id = proposalId(proposal);
   return {
     idempotencyKey: proposal.proposalKey,
@@ -116,7 +127,7 @@ function proposalEvent(proposal) {
   };
 }
 
-function findProposal(runtimeRoot, decision) {
+function findProposal(runtimeRoot: string, decision: CorrectionDecision) {
   const { events } = verifyEventStore({ runtimeRoot });
   const related = events.filter((event) => event.subjectRef === decision.correctionRef);
   const proposal = related.find((event) => event.eventType === 'correction.proposed');
@@ -130,7 +141,7 @@ function findProposal(runtimeRoot, decision) {
   return proposal;
 }
 
-export function planCorrectionProposal(inputOptions = {}) {
+export function planCorrectionProposal(inputOptions: CorrectionProposalOptions = {}): CorrectionProposalPlan {
   validateProposal(inputOptions.proposal);
   const id = proposalId(inputOptions.proposal);
   return {
@@ -143,7 +154,7 @@ export function planCorrectionProposal(inputOptions = {}) {
   };
 }
 
-export async function proposeCorrection(inputOptions = {}) {
+export async function proposeCorrection(inputOptions: CorrectionProposalOptions = {}): Promise<CorrectionProposalResult> {
   if (inputOptions.execute !== true || !inputOptions.runtimeRoot) {
     throw new Error('Correction proposal requires execute: true and runtimeRoot.');
   }
@@ -161,7 +172,7 @@ export async function proposeCorrection(inputOptions = {}) {
   };
 }
 
-export function planCorrectionDecision(inputOptions = {}) {
+export function planCorrectionDecision(inputOptions: CorrectionDecisionOptions = {}): CorrectionDecisionPlan {
   validateDecision(inputOptions.decision);
   if (!inputOptions.runtimeRoot) throw new Error('Correction runtime root is required.');
   const proposal = findProposal(inputOptions.runtimeRoot, inputOptions.decision);
@@ -181,13 +192,13 @@ export function planCorrectionDecision(inputOptions = {}) {
   };
 }
 
-export async function decideCorrection(inputOptions = {}) {
+export async function decideCorrection(inputOptions: CorrectionDecisionOptions = {}): Promise<CorrectionDecisionPlan> {
   if (inputOptions.execute !== true || !inputOptions.runtimeRoot) {
     throw new Error('Correction decision requires execute: true and runtimeRoot.');
   }
   const plan = planCorrectionDecision(inputOptions);
-  const proposal = findProposal(inputOptions.runtimeRoot, inputOptions.decision);
-  const decision = inputOptions.decision;
+  const decision = inputOptions.decision as CorrectionDecision;
+  const proposal = findProposal(inputOptions.runtimeRoot, decision);
   const idempotencyKey = sha256(stableJson({
     correctionRef: decision.correctionRef,
     expectedProposalEventId: decision.expectedProposalEventId,
