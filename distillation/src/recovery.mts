@@ -39,7 +39,7 @@ const Receipt = z.strictObject({ schemaVersion: z.literal(1), attemptToken: Toke
   provider: z.enum(['claude', 'codex']), reason: z.enum(['primary', 'claude-quota-unavailable']),
   state: z.literal('pending-review'), accepted: z.literal(false),
   reservedSeconds: z.number().int().min(1).max(1800), utcDay: z.iso.date(),
-  completionProof: z.literal('windows-atomic-job-empty-v1'), outputJson: z.string(), outputSha256: HashSchema,
+  completionProof: z.enum(['windows-atomic-job-empty-v1', 'windows-job-empty-v1']), outputJson: z.string(), outputSha256: HashSchema,
   usage: Usage, modelElapsedSeconds: z.number().finite().min(0).max(3600), recordedAt: z.iso.datetime() });
 
 function outcome(state: string, writes = false) {

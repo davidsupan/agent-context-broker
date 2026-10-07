@@ -17,7 +17,7 @@ import { liveProbeCoordinator } from '../src/pilot-budget.mts';
     await first.settle({ completionProof: 'process-tree-empty-v1', durationMs: 0, exitCode: 0 });
     await expect(coordinator.reserve(request)).rejects.toThrow('pilot-already-reserved');
     const second = await coordinator.reserve({ ...request, provider: 'codex' });
-    await second.settle({ completionProof: 'windows-atomic-job-empty-v1', durationMs: 0, exitCode: 1 });
+    await second.settle({ completionProof: 'windows-job-empty-v1', durationMs: 0, exitCode: 1 });
     using check = openStore(join(home, 'queue.sqlite3'), { readonly: true });
     expect(check.query('SELECT seconds FROM semantic_budget').get()).toEqual({ seconds: 120 });
     expect(check.query('SELECT DISTINCT reason FROM semantic_attempts').all()).toEqual([{ reason: 'user-approved-synthetic-pilot' }]);

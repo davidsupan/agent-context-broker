@@ -26,8 +26,9 @@ const Usage = z.object({ input_tokens: z.number().int().min(0).max(1e12).optiona
   cache_read_input_tokens: z.number().int().min(0).max(1e12).optional() });
 export type ModelRequest = { provider: 'claude' | 'codex'; reason: string; token: string;
   jobName: string; slice: Slice; outputSchema: unknown; timeoutMs: number; instructions: string };
-// windows-atomic-job-empty-v1 is the Bun runner's Job Object proof; Node runs prove an empty process tree.
-export type ModelResult = { completionProof: 'process-tree-empty-v1' | 'windows-atomic-job-empty-v1' | 'synthetic-fixture';
+// Retain the legacy atomic-job proof; current runs prove either an empty POSIX
+// process group or a Windows job whose active-process count reached zero.
+export type ModelResult = { completionProof: 'process-tree-empty-v1' | 'windows-atomic-job-empty-v1' | 'windows-job-empty-v1' | 'synthetic-fixture';
   state: 'output' | 'quota-unavailable' | 'failed'; output?: unknown; usage?: unknown; durationMs: number };
 export type ModelRunner = ((request: ModelRequest) => Promise<ModelResult>) & { preflight?: () => Promise<{ invoked: false }> };
 export const INSTRUCTIONS = 'Distill only the provided historical dialogue into the required JSON schema. '
@@ -102,7 +103,7 @@ export async function consumeSlice(home: string, input: WorkerPolicyInput, runne
   } catch {
     return { state: 'containment-unresolved', invoked: true, accepted: false, leaseRetained: true };
   }
-  if (result.completionProof !== 'process-tree-empty-v1' && result.completionProof !== 'windows-atomic-job-empty-v1' && !(options.synthetic && result.completionProof === 'synthetic-fixture')) {
+  if (result.completionProof !== 'process-tree-empty-v1' && result.completionProof !== 'windows-atomic-job-empty-v1' && result.completionProof !== 'windows-job-empty-v1' && !(options.synthetic && result.completionProof === 'synthetic-fixture')) {
     return { state: 'containment-unresolved', invoked: true, accepted: false, leaseRetained: true };
   }
   let state: string = result.state === 'quota-unavailable' ? 'quota-unavailable' : 'interrupted-unknown';

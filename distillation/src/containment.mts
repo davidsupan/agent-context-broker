@@ -6,9 +6,8 @@
 // - POSIX: the child leads a new process group (`detached`), and the group is signalled as one: SIGTERM, then
 //   SIGKILL after a grace period. Empty means `kill(-pgid, 0)` reports ESRCH. A descendant that calls setsid()
 //   leaves the group and is not contained; the provider's command does not do that.
-// - Windows: the tree is stopped with `taskkill /T /F`. Empty means no live process descends from the child in a
-//   process snapshot (parent ids, with creation times guarding against pid reuse). A grandchild whose own parent
-//   already exited is not visible to that walk; Job Objects closed that gap and Node has no FFI to create one.
+// - Windows: a compiled-per-run helper creates the child atomically in a non-breakaway Job Object.
+//   Only the job's active-process count reaching zero is cleanup proof, including orphaned descendants.
 //
 // A run label (`jobName`, kept as `Local\ACBCorpus-<token>` for the existing records) names a small registry file,
 // so a later process can ask whether a run it did not start is still active (`probeNamedJob`).
@@ -19,6 +18,8 @@ import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { sha256Hex } from './platform.mts';
+import { runWindowsContained, probeWindowsJob, windowsLauncherAvailable } from './windows-launcher.mts';
+export { windowsLauncherAvailable } from './windows-launcher.mts';
 
 export interface ContainedOptions {
   executable: string;
@@ -37,11 +38,17 @@ export interface ContainedOptions {
 export interface ContainedResult {
   stdout: string;
   stderr: string;
+  stdoutBuffer: Buffer;
+  stderrBuffer: Buffer;
   stdoutBytes: number;
   stderrBytes: number;
   exitCode: number;
   durationMs: number;
-  containmentEmpty: boolean;
+  containmentEmpty: boolean | 'unknown';
+  containment: 'process-tree-v1' | 'windows-job-v1';
+  /** Host startup and per-run compilation measurements, Windows only. */
+  startupMs?: number;
+  compileMs?: number;
   timedOut: boolean;
   outputLimitExceeded: boolean;
 }
@@ -157,7 +164,7 @@ export async function probeOwner(value: unknown): Promise<OwnerState> {
 
 // ---- run registry -------------------------------------------------------------------------------------------
 
-type RegistryRecord = { schemaVersion: 1; jobName: string; platform: ProcessIdentity['platform']; pid: number; start: string | null; state: 'running' | 'empty' | 'unverified'; updatedAt: string };
+type RegistryRecord = { schemaVersion: 1; jobName: string; platform: ProcessIdentity['platform']; pid: number; start: string | null; state: 'running' | 'empty' | 'unverified'; updatedAt: string; containment?: 'windows-job-v1' };
 
 /** Where run records live: AGENT_CONTEXT_BROKER_CONTAINMENT_DIR, else a folder in the system temp directory. */
 export function registryDir(): string {
@@ -189,35 +196,6 @@ function writeRecord(record: RegistryRecord, fresh = false): void {
 
 // ---- process trees ------------------------------------------------------------------------------------------
 
-type WinProcess = { pid: number; ppid: number; created: bigint };
-
-/** All processes with parent id and creation FILETIME, from one CIM query. */
-async function windowsProcesses(): Promise<WinProcess[] | null> {
-  const script = "Get-CimInstance Win32_Process | ForEach-Object { '{0} {1} {2}' -f $_.ProcessId, $_.ParentProcessId, $(if ($_.CreationDate) { $_.CreationDate.ToFileTimeUtc() } else { 0 }) }";
-  const out = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], 30000);
-  if (out.code !== 0) return null;
-  const list: WinProcess[] = [];
-  for (const line of out.stdout.split(/\r?\n/)) {
-    const m = /^(\d+) (\d+) (\d+)$/.exec(line.trim());
-    if (m) list.push({ pid: Number(m[1]), ppid: Number(m[2]), created: BigInt(m[3]!) });
-  }
-  return list;
-}
-
-/** Live descendants of `root` (created after it) in a snapshot. */
-function descendants(list: WinProcess[], root: number, rootCreated: bigint): WinProcess[] {
-  const found: WinProcess[] = [];
-  const queue = [root];
-  const seen = new Set<number>([root]);
-  while (queue.length) {
-    const parent = queue.shift()!;
-    for (const p of list) {
-      if (p.ppid === parent && !seen.has(p.pid) && p.created >= rootCreated) { seen.add(p.pid); found.push(p); queue.push(p.pid); }
-    }
-  }
-  return found;
-}
-
 function groupAlive(pgid: number): boolean {
   try { process.kill(-pgid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === 'EPERM'; }
 }
@@ -226,17 +204,9 @@ function signalGroup(pgid: number, signal: NodeJS.Signals): void {
   try { process.kill(-pgid, signal); } catch { /* already gone */ }
 }
 
-async function killWindowsTree(pid: number): Promise<void> {
-  await run('taskkill.exe', ['/PID', String(pid), '/T', '/F']);
-}
-
 /** Whether nothing the run started is still alive. */
-async function treeEmpty(pid: number, rootCreated: bigint | null): Promise<boolean> {
-  if (POSIX) return !groupAlive(pid);
-  const list = await windowsProcesses();
-  if (!list) return false;
-  if (list.some(p => p.pid === pid && (rootCreated === null || p.created === rootCreated))) return false;
-  return descendants(list, pid, rootCreated ?? 0n).length === 0;
+async function treeEmpty(pid: number): Promise<boolean> {
+  return !groupAlive(pid);
 }
 
 function prepare(options: ContainedOptions) {
@@ -267,6 +237,22 @@ function prepare(options: ContainedOptions) {
 export async function runContained(options: ContainedOptions): Promise<ContainedResult> {
   check(supported(), WINDOWS ? 'windows-x64-required' : 'platform-unsupported');
   const config = prepare(options);
+  if (WINDOWS) {
+    check(windowsLauncherAvailable(), 'windows-containment-unavailable');
+    const owner = await processSnapshot(process.pid);
+    check(owner.state === 'alive' && owner.start, 'windows-owner-identity-unavailable');
+    let pid = 0;
+    const record = (state: RegistryRecord['state'], fresh = false) => {
+      if (config.jobName) writeRecord({ schemaVersion: 1, jobName: config.jobName, platform: 'windows', pid,
+        start: null, state, containment: 'windows-job-v1', updatedAt: new Date().toISOString() }, fresh);
+    };
+    const { input, jobName, ...launch } = config;
+    return runWindowsContained({ ...launch, stdin: input, jobName: jobName ?? undefined }, { pid: process.pid, creationFiletime: owner.start }, {
+      claim: () => { try { record('running', true); } catch { throw new Error('job-name-already-exists'); } },
+      started: value => { pid = value; record('running'); },
+      finished: empty => record(empty === true ? 'empty' : 'unverified'),
+    });
+  }
   if (config.jobName) {
     try { writeRecord({ schemaVersion: 1, jobName: config.jobName, platform: platformName(), pid: 0, start: null, state: 'running', updatedAt: new Date().toISOString() }, true); }
     catch { throw new Error('job-name-already-exists'); }
@@ -287,14 +273,10 @@ export async function runContained(options: ContainedOptions): Promise<Contained
   const stop = () => {
     const pid = child.pid!;
     stopping ??= (async () => {
-      if (POSIX) {
-        signalGroup(pid, 'SIGTERM');
-        const until = performance.now() + TERM_GRACE_MS;
-        while (groupAlive(pid) && performance.now() < until) await sleep(25);
-        signalGroup(pid, 'SIGKILL');
-      } else {
-        await killWindowsTree(pid);
-      }
+      signalGroup(pid, 'SIGTERM');
+      const until = performance.now() + TERM_GRACE_MS;
+      while (groupAlive(pid) && performance.now() < until) await sleep(25);
+      signalGroup(pid, 'SIGKILL');
     })();
     return stopping;
   };
@@ -313,13 +295,8 @@ export async function runContained(options: ContainedOptions): Promise<Contained
     child.once('spawn', () => resolve(child.pid!));
     child.once('error', () => reject(new Error('create-process-failed')));
   });
-  let rootCreated: bigint | null = null;
-  if (WINDOWS) {
-    const snapshot = await processSnapshot(pid);
-    rootCreated = snapshot.start ? BigInt(snapshot.start) : null;
-  }
   if (config.jobName) {
-    const start = WINDOWS ? (rootCreated?.toString() ?? null) : (await processSnapshot(pid)).start;
+    const start = (await processSnapshot(pid)).start;
     writeRecord({ schemaVersion: 1, jobName: config.jobName, platform: platformName(), pid, start, state: 'running', updatedAt: new Date().toISOString() });
   }
 
@@ -332,20 +309,21 @@ export async function runContained(options: ContainedOptions): Promise<Contained
     clearTimeout(timer);
   }
   // The child is gone; whatever it started must be gone too, or be stopped now.
-  let empty = await treeEmpty(pid, rootCreated);
+  let empty = await treeEmpty(pid);
   if (!empty) {
     await stop();
     const until = performance.now() + CLEANUP_TIMEOUT_MS;
-    while (!(empty = await treeEmpty(pid, rootCreated)) && performance.now() < until) await sleep(100);
+    while (!(empty = await treeEmpty(pid)) && performance.now() < until) await sleep(100);
   }
   // With the tree gone the pipes reach EOF; give the last chunks a bounded moment to arrive.
   await Promise.race([closed, sleep(CLEANUP_TIMEOUT_MS)]);
   if (config.jobName) {
-    writeRecord({ schemaVersion: 1, jobName: config.jobName, platform: platformName(), pid, start: WINDOWS ? (rootCreated?.toString() ?? null) : null, state: empty ? 'empty' : 'unverified', updatedAt: new Date().toISOString() });
+    writeRecord({ schemaVersion: 1, jobName: config.jobName, platform: platformName(), pid, start: null, state: empty ? 'empty' : 'unverified', updatedAt: new Date().toISOString() });
   }
   check(empty, 'containment-empty-unverified');
   return {
     stdout: Buffer.concat(out.chunks).toString('utf8'), stderr: Buffer.concat(err.chunks).toString('utf8'),
+    stdoutBuffer: Buffer.concat(out.chunks), stderrBuffer: Buffer.concat(err.chunks), containment: 'process-tree-v1',
     stdoutBytes: out.bytes, stderrBytes: err.bytes, exitCode, durationMs: performance.now() - started,
     containmentEmpty: true, timedOut, outputLimitExceeded,
   };
@@ -358,9 +336,12 @@ export async function probeNamedJob(name: unknown): Promise<NamedJobState> {
     if (!existsSync(recordPath(name))) return 'absent';
     const record = readRecord(name);
     if (!record || record.platform !== platformName()) return 'unknown';
+    if (WINDOWS) {
+      if (record.containment !== 'windows-job-v1') return 'unknown';
+      return record.state === 'empty' ? 'empty' : await probeWindowsJob(name);
+    }
     if (record.state === 'empty') return 'empty';
     if (!record.pid) return 'unknown';
-    if (POSIX) return groupAlive(record.pid) ? 'active' : 'empty';
-    return (await treeEmpty(record.pid, record.start ? BigInt(record.start) : null)) ? 'empty' : 'active';
+    return groupAlive(record.pid) ? 'active' : 'empty';
   } catch { return 'unknown'; }
 }

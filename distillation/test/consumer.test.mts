@@ -56,6 +56,14 @@ test('synthetic completion proof cannot release a production lease', async () =>
   const f = fixture(); expect(await consumeSlice(f.home, policy, answer, { now: options.now })).toMatchObject({ leaseRetained: true });
   expect(inspect(f.home, 'SELECT state FROM semantic_attempts')[0]!.state).toBe('running');
 });
+test('current job proof releases the lease and persists the proof with the result', async () => {
+  const f = fixture();
+  const runner = async (request: ModelRequest): Promise<ModelResult> => ({ ...await answer(request), completionProof: 'windows-job-empty-v1' });
+  expect(await consumeSlice(f.home, policy, runner, options)).toMatchObject({ state: 'pending-review' });
+  const receipt = JSON.parse(readFileSync(join(f.home, 'semantic-results', readdirSync(join(f.home, 'semantic-results'))[0]!), 'utf8'));
+  expect(receipt.completionProof).toBe('windows-job-empty-v1');
+});
+
 test('unknown runner failure retains lease and never falls back', async () => {
   const f = fixture(); let calls = 0;
   const runner = async () => { calls++; throw new Error('sensitive provider failure'); };

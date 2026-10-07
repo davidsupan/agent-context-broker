@@ -3,7 +3,8 @@ import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { basename, dirname, join, resolve } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { INSTRUCTIONS, type ModelRequest } from '../src/consumer.mts';
 import { buildSlices, digest } from '../src/slicing.mts';
 import { modelOutputSchema } from '../src/output.mts';
@@ -58,7 +59,7 @@ function codex(value: unknown): Array<Record<string, unknown>> { return [
 ]; }
 function jsonl(events: unknown[]) { return events.map(value => JSON.stringify(value)).join('\n') + '\n'; }
 function result(stdout: string, overrides: Partial<ContainedResult> = {}): ContainedResult {
-  return { stdout, stderr: '', stdoutBytes: Buffer.byteLength(stdout), stderrBytes: 0,
+  return { stdout, stderr: '', stdoutBuffer: Buffer.from(stdout), stderrBuffer: Buffer.alloc(0), containment: 'process-tree-v1', stdoutBytes: Buffer.byteLength(stdout), stderrBytes: 0,
     exitCode: 0, durationMs: 10, containmentEmpty: true, timedOut: false, outputLimitExceeded: false, ...overrides };
 }
 function capability(provider: Provider, executableSha256: string) {
@@ -229,7 +230,7 @@ describe('provider profiles and pre-reservation gates', () => {
       } finally { f.cleanup(); }
     });
   }
-  test('a valid live profile is ready on POSIX and refused on Windows until the contained launcher exists', async () => {
+  test('a valid live profile is ready with the contained launcher', async () => {
     const f = fixture('claude');
     try {
       const live = { schemaVersion: 1, kind: 'human-reviewed-live-profile', provider: 'claude', approved: true, liveProfileVerified: true,
@@ -242,8 +243,21 @@ describe('provider profiles and pre-reservation gates', () => {
       const livePath = join(f.home, 'live-profile.json'), bytes = JSON.stringify(live);
       writeFileSync(livePath, bytes);
       f.config.providers.claude = { ...f.binding, liveProfileReceipt: { path: livePath, sha256: hash(bytes) } };
-      if (process.platform === 'win32') await expect(preflight(f.config, f.home)).rejects.toThrow('provider-windows-containment-unavailable');
-      else expect((await preflight(f.config, f.home)).state).toBe('ready');
+      expect((await preflight(f.config, f.home)).state).toBe('ready');
+      if (process.platform === 'win32') {
+        // Isolate a package missing its helper without changing the files used by
+        // concurrent tests. Keep dependency resolution inside this checkout.
+        const temp = fileURLToPath(new URL('../../tmp/', import.meta.url));
+        mkdirSync(temp, { recursive: true });
+        const incomplete = mkdtempSync(join(temp, 'launcher-unavailable-'));
+        try {
+          cpSync(fileURLToPath(new URL('../src/', import.meta.url)), incomplete, {
+            recursive: true, filter: path => !path.endsWith('windows-launcher.cs'),
+          });
+          const isolated = await import(pathToFileURL(join(incomplete, 'provider.mts')).href);
+          await expect(isolated.preflight(f.config, f.home)).rejects.toThrow('provider-windows-containment-unavailable');
+        } finally { rmSync(incomplete, { recursive: true, force: true }); }
+      }
     } finally { f.cleanup(); }
   });
   test('bare Claude and Node-launched/tool-enabled Codex receipts are rejected', () => {

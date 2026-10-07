@@ -7,7 +7,7 @@ import { hashArtifact } from './artifacts.mts';
 import { noLinks } from './store.mts';
 import { canonical } from './slicing.mts';
 import { CODEX_DISABLED_FEATURES, providerArgv, parseProviderOutput, providerErrorClass, providerOutputShape, validateCapabilityFixture,
-  bindingEnvironment, argvProfileSha256, environmentPolicyFor, PinnedEnvironmentSchema, prepareProviderRequest } from './provider.mts';
+  bindingEnvironment, argvProfileSha256, environmentPolicyFor, PinnedEnvironmentSchema, prepareProviderRequest, COMPLETION_PROOF } from './provider.mts';
 import { SliceSchema, modelOutputSchema, validateOutput, withRunnerCoverage } from './output.mts';
 import { INSTRUCTIONS } from './consumer.mts';
 import { syntheticDistillationRequest, validateSyntheticDistillation } from './distillation-probe.mts';
@@ -30,7 +30,7 @@ export const ProbeOptionsSchema = z.strictObject({
 export type ProbeOptions = z.input<typeof ProbeOptionsSchema>;
 export type ProbeDiagnostics = {
   phase: 'version' | 'fixture'; exitCode: number; timedOut: boolean; outputLimitExceeded: boolean;
-  containmentEmpty: boolean; stdoutBytes: number; stderrBytes: number; requests: number; fixtureErrors: string[];
+  containmentEmpty: boolean | 'unknown'; stdoutBytes: number; stderrBytes: number; requests: number; fixtureErrors: string[];
   rejectedKnownArgument: string | null;
   outputItemKinds?: string[];
   rejectionShape?: { keys: string[]; vocabulary: string[]; matchesWire: boolean };
@@ -325,7 +325,7 @@ export async function probeCapability(options: ProbeOptions) {
       const result = await runContained({ executable: o.executable, args, cwd: join(session, 'cwd'), env, stdin,
         timeoutMs, maxOutputBytes: 65536, jobName: `Local\\ACBCapability-${crypto.randomUUID()}` });
       await assertProbePolicyAbsent(o.provider); await verifyBinary();
-      if (!result.containmentEmpty || result.timedOut || result.outputLimitExceeded || result.exitCode !== 0 ||
+      if (result.containmentEmpty !== true || result.timedOut || result.outputLimitExceeded || result.exitCode !== 0 ||
         result.stdoutBytes + result.stderrBytes > 65536) {
         const observed = fixture!.snapshot();
         const rejected = /unexpected argument '([^']+)'/.exec(result.stderr)?.[1];
@@ -461,7 +461,7 @@ export interface LiveProbeCoordinator {
   reserve(request: { approvalId: string; provider: Provider; seconds: 60; globalBudgetSeconds: 1800 }): Promise<{
     reservationId: string;
     jobName: string;
-    settle(proof: { completionProof: 'process-tree-empty-v1'; durationMs: number; exitCode: number }): Promise<void>;
+    settle(proof: { completionProof: typeof COMPLETION_PROOF; durationMs: number; exitCode: number }): Promise<void>;
   }>;
 }
 
@@ -552,8 +552,9 @@ export async function runLiveProbe(options: LiveProbeOptions, coordinator: LiveP
       stdin: payload.stdin,
       timeoutMs: 50000, maxOutputBytes: 65536, jobName: permit.jobName });
     check(result.containmentEmpty === true, 'probe-live-containment-unverified');
+    check(process.platform !== 'win32' || result.containment === 'windows-job-v1', 'probe-live-containment-unverified');
     // Settlement reports process proof even when parsing/hash checks reject output.
-    await permit.settle({ completionProof: 'process-tree-empty-v1', durationMs: result.durationMs, exitCode: result.exitCode });
+    await permit.settle({ completionProof: COMPLETION_PROOF, durationMs: result.durationMs, exitCode: result.exitCode });
     const after = await livePreflight(o);
     check(after.environmentSha256 === before.environmentSha256 && after.argvProfileSha256 === before.argvProfileSha256,
       'probe-profile-changed');
@@ -584,7 +585,7 @@ export async function runLiveProbe(options: LiveProbeOptions, coordinator: LiveP
       authHome: o.authHome, runtimeHome: o.home, subscriptionAuthRequested: true, subscriptionAuthVerified: false,
       humanReviewPerformed: false, liveProfileVerified: false, networkIsolationVerified: false,
       purpose: o.purpose, inputSha256: hash(payload.stdin), distillationValidated: Boolean(distillation),
-      completionProof: 'process-tree-empty-v1', containmentEmpty: true, exitCode: result.exitCode,
+      completionProof: COMPLETION_PROOF, containmentEmpty: true, exitCode: result.exitCode,
       durationMs: result.durationMs, stdoutBytes: result.stdoutBytes, stderrBytes: result.stderrBytes,
       outputSha256: hash(canonical(output.output)), usage: output.usage,
     };

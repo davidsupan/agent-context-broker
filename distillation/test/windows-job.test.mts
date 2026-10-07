@@ -3,7 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { copyFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CLEANUP_TIMEOUT_MS, ownProcessIdentity, probeNamedJob, probeOwner,
+import { CLEANUP_TIMEOUT_MS, ownProcessIdentity, probeNamedJob, probeOwner, registryDir,
   runContained, type ContainedOptions } from '../src/windows-job.mts';
 
 const supported = process.platform === 'win32' ? process.arch === 'x64' : process.platform === 'darwin' || process.platform === 'linux';
@@ -87,7 +87,10 @@ describe('durable recovery snapshots', () => {
       let jobState='absent';
       for(let i=0;i<20;i++){jobState=await probeNamedJob(${JSON.stringify(name)});if(jobState==='active')break;await new Promise(r=>setTimeout(r,100));}
       console.log(JSON.stringify({owner,ownerState:await probeOwner(owner),jobState}));`;
-    const result = await runContained(options(code, { jobName: name, timeoutMs: 15000 }));
+    // Recovery tools need an explicit shared registry/temp location now that no
+    // parent environment variables are silently inserted into the child.
+    const result = await runContained(options(code, { jobName: name, timeoutMs: 15000, cwd: process.cwd(),
+      env: { ...options('').env, TEMP: tmpdir(), TMP: tmpdir(), AGENT_CONTEXT_BROKER_CONTAINMENT_DIR: registryDir() } }));
     expect(result.exitCode).toBe(0);
     const observed = JSON.parse(result.stdout);
     expect(observed.ownerState).toBe('alive');
@@ -111,22 +114,19 @@ describe('contained native Node processes', () => {
     expect(result.exitCode).toBe(259); expect(result.containmentEmpty).toBe(true);
   });
 
-  // libuv adds these parent variables when the given environment lacks them; live runs are refused on Windows for that.
-  const LIBUV_REQUIRED = ['HOMEDRIVE', 'HOMEPATH', 'LOGONSERVER', 'PATH', 'SYSTEMDRIVE', 'SYSTEMROOT', 'TEMP', 'USERDOMAIN', 'USERNAME', 'USERPROFILE', 'WINDIR'];
-  (process.platform === 'win32' ? test : test.skip)('argv round trips through spaced executable and cwd; extra variables are only libuv required ones', async () => {
+  (process.platform === 'win32' ? test : test.skip)('argv round trips through spaced executable and cwd; the whole environment is exact', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'acb containment spaces '));
     try {
       const executable = join(directory, 'synthetic node.exe');
       copyFileSync(process.execPath, executable);
       const args = ['', 'a b', 'x\ty', 'quote"inside', 'trail space\\', '\\\\"', 'é🚀', '&|<>^%PATH%'];
-      const code = 'console.log(JSON.stringify({args:process.argv.slice(1),cwd:process.cwd(),value:process.env.ACB_TEST,keys:Object.keys(process.env)}));';
+      const code = 'console.log(JSON.stringify({args:process.argv.slice(1),cwd:process.cwd(),env:process.env}));';
+      const env = { SystemRoot: process.env.SystemRoot ?? 'C:\\Windows', ACB_TEST: 'synthetic value', lower_case: 'one=two\nthree', EMPTY: '' };
       const result = await runContained(options(code, { executable, cwd: directory,
-        args: ['-e', code, '--', ...args], env: { SystemRoot: process.env.SystemRoot ?? 'C:\\Windows', ACB_TEST: 'synthetic value' } }));
+        args: ['-e', code, '--', ...args], env }));
       expect(result.exitCode).toBe(0);
       const seen = JSON.parse(result.stdout);
-      expect({ args: seen.args, cwd: seen.cwd, value: seen.value }).toEqual({ args, cwd: directory, value: 'synthetic value' });
-      const extra = seen.keys.map((key: string) => key.toUpperCase()).filter((key: string) => key !== 'ACB_TEST' && key !== 'SYSTEMROOT');
-      expect(extra.every((key: string) => LIBUV_REQUIRED.includes(key))).toBe(true);
+      expect(seen).toEqual({ args, cwd: directory, env });
     } finally { rmSync(directory, { recursive: true, force: true }); }
   });
 

@@ -88,6 +88,14 @@ test('valid persisted result recovers on restart, stays pending-review and never
   expect(readFileSync(f.resultPath).equals(receiptBytes)).toBe(true);
 });
 
+test('current Windows job proof recovers only after owner and containment checks', async () => {
+  const f = fixture(); f.persist({ ...f.receipt, completionProof: 'windows-job-empty-v1' });
+  expect(await recover(f.home, policy, false, ended)).toMatchObject({ state: 'recoverable-result', writes: false });
+  expect(await recover(f.home, policy, true, { ...ended, containmentStatus: () => 'unknown' }))
+    .toMatchObject({ state: 'containment-unresolved', writes: false });
+  expect(await recover(f.home, policy, true, ended)).toMatchObject({ state: 'recovered-result', writes: true });
+});
+
 test('proven dead predispatch releases only the lease, preserving the charged reservation', async () => {
   const f = fixture(false);
   expect(await recover(f.home, policy, false, ended)).toMatchObject({ state: 'recoverable-before-dispatch', writes: false });

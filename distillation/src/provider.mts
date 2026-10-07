@@ -6,12 +6,12 @@ import { SliceSchema, modelOutputSchema, validateOutput, withRunnerCoverage } fr
 import { canonical, digest, redactBlock } from './slicing.mts';
 import { hashArtifact } from './artifacts.mts';
 import { noLinks } from './store.mts';
-import { runContained, type ContainedOptions, type ContainedResult } from './windows-job.mts';
+import { runContained, windowsLauncherAvailable, type ContainedOptions, type ContainedResult } from './windows-job.mts';
 import { sha256Hex } from './platform.mts';
 
 const WINDOWS = process.platform === 'win32';
 /** The completion proof of a contained run on Node: the process tree verified empty (containment.mts). */
-export const COMPLETION_PROOF = 'process-tree-empty-v1' as const;
+export const COMPLETION_PROOF = WINDOWS ? 'windows-job-empty-v1' as const : 'process-tree-empty-v1' as const;
 import { CODEX_STARTUP_NOTICE_POLICY, permitsCodexStartupNotice, type CodexParserBinding } from './codex-startup-policy.mts';
 
 const MiB = 1024 * 1024;
@@ -302,9 +302,7 @@ async function checkBinding(provider: ProviderName, binding: BoundProvider, home
   validateCapabilityFixture(readReceipt(binding.capabilityReceipt), { provider, ...binding });
   const executable = await hashArtifact(binding.executable, 512 * MiB);
   requireValue(executable.sha256 === binding.executableSha256, 'provider-executable-changed');
-  // Node on Windows cannot give the child an exact environment (libuv adds required parent variables) or a job
-  // object, so live runs stay closed there until the contained launcher exists.
-  requireValue(fixture || !WINDOWS, 'provider-windows-containment-unavailable');
+  requireValue(fixture || !WINDOWS || windowsLauncherAvailable(), 'provider-windows-containment-unavailable');
   return { env, fingerprint: digest({ executable: executable.sha256, capability: binding.capabilityReceipt.sha256,
     live: fixture ? null : binding.liveProfileReceipt!.sha256, envHash, profileHash, homeId, authId }) };
 }
@@ -626,6 +624,7 @@ async function makeRunner(config: ProviderConfig, home: string, execute: Executo
         timeoutMs, jobName: r.jobName });
       requireValue(result.containmentEmpty === true && Number.isFinite(result.durationMs) && result.durationMs >= 0 &&
         result.durationMs <= 3600000, 'provider-containment-unverified');
+      requireValue(fixture || !WINDOWS || result.containment === 'windows-job-v1', 'provider-windows-containment-unavailable');
       const completionProof = fixture ? 'synthetic-fixture' as const : COMPLETION_PROOF;
       const failed: ModelResult = { completionProof, state: 'failed', durationMs: result.durationMs };
       try {
@@ -633,11 +632,12 @@ async function makeRunner(config: ProviderConfig, home: string, execute: Executo
         requireValue(before.fingerprint === after.fingerprint, 'provider-proof-drift');
         requireValue(!result.timedOut && !result.outputLimitExceeded && result.exitCode === 0 &&
           result.stdoutBytes <= fixed.value.maxOutputBytes && result.stderrBytes <= fixed.value.maxStderrBytes &&
-          Buffer.byteLength(result.stdout) === result.stdoutBytes && Buffer.byteLength(result.stderr) === result.stderrBytes,
+          result.stdoutBuffer.byteLength === result.stdoutBytes && result.stderrBuffer.byteLength === result.stderrBytes,
           'provider-process-failed');
+        const stdout = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(result.stdoutBuffer);
         // No VERIFIED_QUOTA_CODES: all errors, including structured quota codes,
         // remain failures. Human text never triggers automatic provider fallback.
-        const parsed = parseProviderOutput(r.provider, result.stdout, result.exitCode, r.provider === 'codex' ? binding : undefined);
+        const parsed = parseProviderOutput(r.provider, stdout, result.exitCode, r.provider === 'codex' ? binding : undefined);
         if (parsed.startupNotices?.length) {
           const directory = join(fixed.home, 'provider-notices');
           noLinks(directory); mkdirSync(directory, { recursive: true });

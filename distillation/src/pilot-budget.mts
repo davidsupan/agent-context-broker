@@ -9,7 +9,7 @@ import type { LiveProbeCoordinator } from './capability-probe.mts';
 const Approval = z.string().regex(/^[A-Za-z0-9_.:-]{1,120}$/);
 const Request = z.strictObject({ approvalId: Approval, provider: z.enum(['claude', 'codex']),
   seconds: z.literal(60), globalBudgetSeconds: z.literal(1800) });
-const Proof = z.strictObject({ completionProof: z.enum(['process-tree-empty-v1', 'windows-atomic-job-empty-v1']),
+const Proof = z.strictObject({ completionProof: z.enum(['process-tree-empty-v1', 'windows-atomic-job-empty-v1', 'windows-job-empty-v1']),
   durationMs: z.number().finite().min(0).max(60000), exitCode: z.number().int() });
 
 /** Separate approved synthetic probes, but the SAME ledger and active-worker
