@@ -32,6 +32,21 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "teamShared": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "maxContextBytes": { "type": "integer", "minimum": 0, "maximum": 65536, "default": 2048,
+              "description": "Notice injection lane cap including its header and envelopes, further limited to one quarter of the selected profile budget." }
+          }
+        },
+        "sources": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "teamShared": { "enum": ["allow", "deny"], "default": "deny" }
+          }
+        },
         "strictIsolation": {
           "type": "boolean",
           "description": "When true the provider receives no context and may not publish, as AGENT_CONTEXT_BROKER_STRICT_ISOLATION=1 does for every provider."

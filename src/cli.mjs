@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import * as claudeCode from './claude-inventory.mts';
 import * as codex from './codex-inventory-v2.mts';
 import { planContextQuery, runContextQuery } from './context-query.mjs';
+import { runContextNoticesCommand } from './context-notices.mjs';
 import { runClaimsCommand } from './claims-export-cli.mts';
 import { runWithdrawCommand } from './claims-withdraw-cli.mts';
 import { describeProviderPolicy, loadProviderPolicy } from './provider-policy.mjs';
@@ -46,6 +47,9 @@ const ADAPTERS = Object.freeze({ codex, 'claude-code': claudeCode });
 function usage() {
   return [
     'Usage:',
+    '  bun src/cli.mjs context-notices list [--unread] [--audience-role <role>] [--detail headline|summary|full] [--subject-type <type>] [--json]',
+    '  bun src/cli.mjs context-notices show <recordId> [--audience-role <role>] [--detail <level>] [--json]',
+    '  bun src/cli.mjs context-notices ack <recordId> --content-digest <sha256> [--execute]',
     '  bun src/cli.mjs inventory --provider <provider> --source <path> [limits]',
     '  bun src/cli.mjs inventory --provider <provider> --source <path> --execute --output <path> --deltas <path> --checkpoint <path> --ledger-dir <path> [limits]',
     '  bun src/cli.mjs related --provider <provider> --source <path> --ledger-dir <path> [--after-sequence <n>] [--include-self]',
@@ -147,6 +151,8 @@ function parseArgs(argv) {
       case '--decision': options.decisionPath = value; break;
       case '--config': options.configPath = value; break;
       case '--runtime-root': options.runtimeRoot = value; break;
+      case '--runtime-home': /** @type {any} */ (options).runtimeHome = value; break;
+      case '--audience-role': /** @type {any} */ (options).audienceRole = value; break;
       case '--event-runtime-root': options.eventRuntimeRoot = value; break;
       case '--attestation-runtime-root': options.attestationRuntimeRoot = value; break;
       case '--read-model-root':
@@ -294,7 +300,9 @@ function parseArgs(argv) {
   return options;
 }
 
-if (['capabilities', 'claims-export'].includes(process.argv[2])) {
+if (process.argv[2] === 'context-notices') {
+  process.exitCode = runContextNoticesCommand(process.argv.slice(3));
+} else if (['capabilities', 'claims-export'].includes(process.argv[2])) {
   process.exitCode = runClaimsCommand(process.argv[2], process.argv.slice(3));
 } else if (process.argv[2] === 'claims-withdraw') {
   process.exitCode = await runWithdrawCommand(process.argv.slice(3));
@@ -309,6 +317,7 @@ if (['capabilities', 'claims-export'].includes(process.argv[2])) {
     // Absent policy keeps earlier behaviour; a present but invalid one stops the command.
     // The policy belongs to the store the command works on, so explicit roots select it.
     options.providerPolicy = loadProviderPolicy({ providerPolicyPath: options.providerPolicyPath,
+      runtimeHome: /** @type {any} */ (options).runtimeHome,
       runtimeRoots: [options.runtimeRoot, options.eventRuntimeRoot] });
   }
 

@@ -17,7 +17,7 @@ const SCOPE_KINDS = ['global', 'project', 'workstream', 'ticket', 'merge-request
 const SENSITIVITY_RANK = { shared: 0, private: 1, restricted: 2 };
 const EVIDENCE_CLASSES = new Set(['canonical-artifact', 'observed-tool-result', 'agent-handoff']);
 const PATTERN = /^(?:\*|global|project|workstream|ticket|merge-request):[^\s\0]{1,200}$/u;
-const ENTRY_FIELDS = new Set(['strictIsolation', 'defaultProject', 'read', 'publish']);
+const ENTRY_FIELDS = new Set(['strictIsolation', 'defaultProject', 'read', 'publish', 'sources', 'teamShared']);
 const READ_FIELDS = new Set(['allow', 'deny']);
 const PUBLISH_FIELDS = new Set(['allow', 'deny', 'maxSensitivity', 'evidenceClasses']);
 
@@ -52,6 +52,13 @@ function rules(value, fields) {
 
 function entry(value) {
   if (!isRecord(value) || Object.keys(value).some((key) => !ENTRY_FIELDS.has(key))) throw invalid();
+  if (value.teamShared !== undefined && (!isRecord(value.teamShared) ||
+      Object.keys(value.teamShared).some((key) => key !== 'maxContextBytes') ||
+      (value.teamShared.maxContextBytes !== undefined && (!Number.isSafeInteger(value.teamShared.maxContextBytes) ||
+        value.teamShared.maxContextBytes < 0 || value.teamShared.maxContextBytes > 65536)))) throw invalid();
+  if (value.sources !== undefined && (!isRecord(value.sources) ||
+      Object.keys(value.sources).some((key) => key !== 'teamShared') ||
+      (value.sources.teamShared !== undefined && !['allow', 'deny'].includes(value.sources.teamShared)))) throw invalid();
   if (value.strictIsolation !== undefined && typeof value.strictIsolation !== 'boolean') throw invalid();
   if (value.defaultProject !== undefined && value.defaultProject !== null &&
       (typeof value.defaultProject !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$/u.test(value.defaultProject))) {
@@ -59,6 +66,8 @@ function entry(value) {
   }
   return Object.freeze({
     strictIsolation: value.strictIsolation === true,
+    sources: Object.freeze({ teamShared: value.sources?.teamShared ?? 'deny' }),
+    teamShared: Object.freeze({ maxContextBytes: value.teamShared?.maxContextBytes ?? 2048 }),
     ...(value.defaultProject !== undefined ? { defaultProject: value.defaultProject } : {}),
     read: rules(value.read, READ_FIELDS),
     publish: rules(value.publish, PUBLISH_FIELDS)
@@ -122,6 +131,13 @@ export function policyEntry(policy, provider) {
   return policy?.providers?.[provider] ?? null;
 }
 
+/** The shared source is opt-in even without a provider policy. Isolation always wins.
+ * @param {ReturnType<typeof loadProviderPolicy>} policy @param {string} provider */
+export function teamSharedReadable(policy, provider) {
+  const rule = policyEntry(policy, provider);
+  return !rule?.strictIsolation && rule?.sources?.teamShared === 'allow';
+}
+
 function globMatch(pattern, value) {
   const expression = pattern.split('*').map((part) => part.replace(/[.+?^${}()|[\]\\]/gu, '\\$&')).join('.*');
   return new RegExp(`^${expression}$`, 'iu').test(value);
@@ -180,6 +196,7 @@ export function describeProviderPolicy(policy) {
     sha256: policy.sha256,
     providers: Object.fromEntries(Object.entries(policy.providers).map(([provider, rule]) => [provider, {
       strictIsolation: rule.strictIsolation,
+      sources: rule.sources,
       defaultProject: rule.defaultProject === undefined ? 'inherited' : rule.defaultProject === null ? 'none' : 'set',
       read: rule.read ? { allow: rule.read.allow?.length ?? 'all', deny: rule.read.deny?.length ?? 0 } : 'unrestricted',
       publish: rule.publish ? {
