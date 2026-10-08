@@ -820,7 +820,11 @@ function persistReview(root, batch, result, analysis) {
     issues: result.issues,
     candidateClaims: containsUnsafe
       ? []
-      : claims.filter((/** @type {any} */ claim) => !analysis.withdrawnKeys.has(hash(claim?.claimKey ?? 'invalid'))).map(reviewClaim),
+      : claims.filter((/** @type {any} */ claim) => !analysis.withdrawnKeys.has(hash(claim?.claimKey ?? 'invalid'))).map((/** @type {any} */ claim) => {
+        const candidate = reviewClaim(claim);
+        const published = result.publishedClaims?.find((/** @type {any} */ item) => item.claimKey === claim.claimKey);
+        return published ? { ...candidate, claimId: published.claimId, publicationClaimKey: claim.claimKey } : candidate;
+      }),
     payloadSuppressed: containsUnsafe || analysis.withdrawnKeys.size > 0
   };
   writeJson(join(root, 'review', `${review.reviewId}.json`), review);
@@ -868,27 +872,37 @@ export async function reconcileClaimBatch(inputOptions) {
 
   return withLock(join(root, 'state.lock'), options, async () => {
     const state = resumeWithdrawalDeletes(root);
-    synchronizeRegistry(root, state);
+    if (!options.beforePublication || existsSync(statePath)) synchronizeRegistry(root, state);
     await deliverCommittedOutbox(root, state, options.eventRuntimeRoot ?? root);
     const batchKey = hash(`batch:${options.batch?.batchId ?? 'invalid'}`);
     if (state.batches[batchKey]) {
       const replay = state.batches[batchKey];
       const historical = state.historicalBatches?.[batchKey] === true;
+      options.beforePublication?.({ writes: replay.publishedClaims ?? [] });
       return { ...replay, idempotentReplay: true, ...(historical ? { historical: true } : {}) };
     }
 
     const now = options.now ? new Date(options.now) : new Date();
     const analysis = analyze(options.batch, state, options);
+    /** @type {any} */
     let result;
 
     if (analysis.state !== 'clean') {
       result = publicResult(options.batch, analysis, now, { writesEnabled: true });
+      const writes = !options.beforePublication || analysis.issues.some(item => item.code.startsWith('unsafe-')) ? [] : (options.batch?.claims ?? [])
+        .filter((/** @type {any} */ claim) => typeof claim?.claimKey === 'string' && !analysis.withdrawnKeys.has(hash(claim.claimKey)))
+        .map((/** @type {any} */ claim) => ({ claimId: hash(`${result.reconciliationId}:${claim.claimKey}`), claimKey: claim.claimKey,
+          reviewId: result.reconciliationId, scopeKey: analysis.scopeKey }));
+      options.beforePublication?.({ writes, bytes: Buffer.byteLength(stableJson(options.batch.claims)) });
+      synchronizeRegistry(root, state);
+      if (options.beforePublication) result.publishedClaims = writes;
       persistReview(root, options.batch, result, analysis);
       persistAudit(root, result, options.batch, analysis);
     } else {
       const previousIndex = analysis.current?.claimIndex ?? {};
       const claimIndex = { ...previousIndex };
 
+      const publicationClaims = [];
       for (const item of analysis.accepted) {
         const acceptedCore = {
           schemaVersion: 1,
@@ -915,13 +929,18 @@ export async function reconcileClaimBatch(inputOptions) {
           claimId,
           value: item.claim.value,
         };
-        writeJson(join(root, 'claims', `${claimId}.json`), acceptedClaim);
+        publicationClaims.push(acceptedClaim);
         claimIndex[item.claim.claimKey] = {
           claimId,
           valueHash: item.valueHash,
           canonicalRefs: item.claim.canonicalRefs
         };
       }
+
+      const writes = publicationClaims.map(claim => ({ claimId: claim.claimId, claimKey: claim.claimKey, scopeKey: analysis.scopeKey }));
+      options.beforePublication?.({ writes, bytes: publicationClaims.reduce((sum, claim) => sum + Buffer.byteLength(`${JSON.stringify(claim, null, 2)}\n`), 0) });
+      synchronizeRegistry(root, state);
+      for (const claim of publicationClaims) writeJson(join(root, 'claims', `${claim.claimId}.json`), claim);
 
       if (analysis.accepted.length === 0 && analysis.current) {
         result = publicResult(options.batch, analysis, now, {
@@ -970,6 +989,11 @@ export async function reconcileClaimBatch(inputOptions) {
       }
     }
 
+    if (options.beforePublication && analysis.state === 'clean') {
+      result.publishedClaims = analysis.accepted.map(item => ({
+        claimId: state.scopes[/** @type {string} */ (analysis.scopeKey)]?.claimIndex[item.claim.claimKey]?.claimId,
+        claimKey: item.claim.claimKey, scopeKey: analysis.scopeKey }));
+    }
     state.revision += 1;
     state.updatedAt = now.toISOString();
     state.batches[batchKey] = result;

@@ -398,3 +398,88 @@ protections or artifact origin. Local configuration, the cache and Git metadata
 are trusted operator inputs, not a defence against an attacker with local write
 access. Never copy an approvals file from the data checkout into this trust cache.
 Present malformed policy files fail closed.
+
+## Emergency grants
+
+An operator can temporarily give a restricted provider full policy access. The
+provider's read, publish, strict-isolation and `sources.teamShared` rules are
+ignored for that grant. Explicit caller isolation (the flag, strict profile, or
+`AGENT_CONTEXT_BROKER_STRICT_ISOLATION=1`) still wins. Normal reconciliation,
+source attestation, content safety, notice trust checks and profile budgets remain
+in force. A grant does not authenticate a declared provider.
+
+Both launchers accept these commands (add `--runtime-home <path>` to select a home):
+
+```sh
+agent-context emergency open --provider codex --until 2026-10-08T15:00:00Z --reason "Primary window exhausted" --trigger primary-rate-limit --window five_hour
+agent-context emergency open --provider codex --until 2026-10-08T15:00:00Z --reason "Primary window exhausted" --trigger primary-rate-limit --window five_hour --execute
+agent-context emergency status --provider codex
+agent-context emergency close --provider codex --reason primary-restored --execute
+agent-context emergency report --grant <id>
+agent-context emergency report --since 2026-10-01T00:00:00Z --text
+```
+
+Open and close plan by default and write only with `--execute`. `--until` must be
+absolute, later than opening, and at most 7 days 1 hour later. Reasons are plain,
+single-line text of at most 500 characters. Trigger defaults to `manual`; window
+defaults to null. Opening an active provider again must extend expiry and creates
+a new grant with `supersedes`, preserving the earlier grant's audit history.
+Expiry is checked during policy evaluation; executed evaluations and status append
+a single `closed` record with reason `expired`. Planning evaluates expiry without
+writing. Status reports chain verification and current grants. Exit codes are
+0 success, 2 usage, 3 integrity failure, and 1 other errors.
+
+`<runtimeHome>/emergency/grants.jsonl` contains `opened`, `used`, and `closed`
+records, each with `prevHash` and a SHA-256 `hash` of the recursively key-sorted
+JSON record excluding `hash` (including `prevHash`). The initial previous hash is
+64 zeroes. A local `head.json` checkpoint also detects tail deletion. An exclusive
+lock serializes appends; interrupted or mismatched storage fails closed and is
+never automatically repaired. See [the security model](security-model.md#emergency-ledger).
+
+Executed queries and lifecycle injections record scope relation hashes and kinds,
+profile, route reason, included claim ids/keys, peer-progress ids, included team
+notice record ids, and counts/bytes. They never put claim values or payload text
+in this ledger. Query append failures return `emergency-ledger-append-failed` and
+still answer. A bad chain returns `emergency-ledger-invalid` and uses normal policy.
+Planning writes no use records.
+
+Publications and peer progress reserve their ids in the ledger before persisting
+content; failure to append prevents the write. The JSON report lists each grant's
+timing, duration, operation counts, distinct scopes, keys read, keys published,
+progress ids, notice ids and every written claim's current state. Accepted and
+pending claims can both be passed by reported id to `claims-withdraw`. Withdrawing
+a pending candidate preserves an already accepted claim of the same key. If
+persistence fails after the ledger append, the report says `not-persisted`; a
+ledger entry alone is not a commit receipt. Counts include these reserved attempts
+and idempotent invocations. `claimsRead` counts included claim occurrences, while
+`claimKeysRead` is distinct. Query bytes count the exact rendered payload; publication
+bytes measure accepted claim JSON (or submitted candidate JSON for pending
+batches); progress bytes measure the artifact JSON. Idempotent claim replays
+record zero write bytes. Only the numeric byte counts enter the ledger.
+
+On the primary provider's next `SessionStart`, the advisory includes a short line
+for each other provider's unsummarised grant, including still-open grants. The
+line contains timing, reason and counts, never claim keys or values. Grant ids
+are recorded in `emergency/summarised.json`; a grant is summarised once per home,
+so a grant summarised while open is not repeated when it later closes.
+
+## Injection audit retention and truncation
+
+```sh
+agent-context audit prune --older-than-days 30
+agent-context audit prune --older-than-days 30 --execute
+```
+
+Pruning is manual and plans by default. The default retention is 30 days, based
+on the timestamp in the generated injection filename. The plan reports candidate
+and kept counts, oldest/newest kept timestamps and bytes that would be freed.
+Execution reports deleted count. Only regular timestamp/UUID `.json` files in
+`runtime/query-audit/injections` are eligible; symlinks, directory junctions,
+subdirectories and other filenames are excluded or refused. Other audit stores
+are untouched. No automatic retention runs.
+
+When the context byte cap omits an included claim's rendered line, its candidate
+and accepted-layer claim detail have `truncated: true` and `omittedBytes`. These
+metadata travel with the trace in the injection audit. The renderer preserves
+whole-line boundaries: omitted bytes count the full claim line without its line
+separator. Uncut claims have neither flag nor omitted-byte field.

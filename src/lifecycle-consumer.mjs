@@ -1,3 +1,4 @@
+import { prepareEmergency, emergencyUse, emergencyAdvisory } from './emergency.mts';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   closeSync,
@@ -459,6 +460,11 @@ function persistInjection(options, eventName, advisory, trace, natural, threadRe
   }
   trace.budget.renderedContextBytes = Buffer.byteLength(advisory, 'utf8');
   trace.layers = traceLayers(trace);
+  try { emergencyUse(options, options.emergency, 'refresh', { trace, context: advisory, routeReason: 'lifecycle-advisory' }); }
+  catch (error) {
+    options.emergency.warnings.push('emergency-ledger-append-failed');
+    if (error instanceof Error && error.message === 'emergency-ledger-invalid') options.emergency.warnings.push('emergency-ledger-invalid');
+  }
   const injection = persistQueryInjection(options.globalAuditDirectory, {
     generatedAt: options.now.toISOString(),
     provider: options.provider,
@@ -515,6 +521,7 @@ export function createLifecycleConsumer(inputDefinition) {
     );
     return {
       provider: definition.provider,
+      runtimeHome: inputOptions.runtimeHome,
       runtimeRoot,
       eventRuntimeRoot,
       globalAuditDirectory: resolve(inputOptions.globalAuditDirectory ??
@@ -554,7 +561,7 @@ export function createLifecycleConsumer(inputDefinition) {
   }
 
   async function handleHookEvent(event, inputOptions = {}) {
-    if (inputOptions.strictIsolation === true || definition.strictIsolation?.() === true) {
+    if (inputOptions.strictIsolation === true || process.env.AGENT_CONTEXT_BROKER_STRICT_ISOLATION === '1' || definition.strictIsolation?.() === true) {
       return { continue: true };
     }
     const options = optionsFor(inputOptions);
@@ -576,8 +583,18 @@ export function createLifecycleConsumer(inputDefinition) {
         return { continue: true };
       }
     }
+    const prepared = prepareEmergency({ ...options, runtimeRoots: [options.contextRuntimeRoot, options.eventRuntimeRoot], execute: true });
+    options.providerPolicy = prepared.providerPolicy;
+    /** @type {any} */ (options).emergency = prepared.emergency;
+    const emergency = /** @type {any} */ (options).emergency;
+    let returnSummary = '';
+    if (eventName === 'SessionStart' && definition.provider === 'claude-code') {
+      try { returnSummary = emergencyAdvisory(options); }
+      catch { emergency.warnings.push(emergency.valid ? 'emergency-ledger-append-failed' : 'emergency-ledger-invalid'); }
+    }
     const policyRule = policyEntry(options.providerPolicy, definition.provider);
-    if (policyRule?.strictIsolation) return { continue: true };
+    if (policyRule?.strictIsolation) return { continue: true, ...(emergency.warnings.length ? { warnings: emergency.warnings } : {}),
+      ...(returnSummary ? { hookSpecificOutput: { hookEventName: eventName, additionalContext: returnSummary } } : {}) };
     if (policyRule && policyRule.defaultProject !== undefined) options.defaultProjectKey = policyRule.defaultProject;
     const trace = createContextTrace({ maxSnapshots: 0, maxClaims: 0, maxContextBytes: 0 });
     trace.lifecycle = { advisoryReferences: 0, claimsInjected: 0 };
@@ -691,7 +708,8 @@ export function createLifecycleConsumer(inputDefinition) {
             sourceTokenState,
             durationMs: Date.now() - startedAt
           });
-          return { continue: true };
+          return { continue: true, ...(emergency.warnings.length ? { warnings: emergency.warnings } : {}),
+            ...(returnSummary ? { hookSpecificOutput: { hookEventName: eventName, additionalContext: returnSummary } } : {}) };
         }
 
         const related = await adapter.readRelatedDeltas({
@@ -720,7 +738,7 @@ export function createLifecycleConsumer(inputDefinition) {
           threadRef
         );
         const peerAdvisory = naturalPeerProgressAdvisory(freshNatural);
-        const advisory = [peerAdvisory, lifecycleAdvisory].filter(Boolean).join('\n\n') || null;
+        const advisory = [returnSummary, peerAdvisory, lifecycleAdvisory].filter(Boolean).join('\n\n') || null;
         const nextState = {
           schemaVersion: 1,
           sessionKey,
@@ -765,8 +783,8 @@ export function createLifecycleConsumer(inputDefinition) {
           durationMs: Date.now() - startedAt
         });
         return advisory
-          ? { hookSpecificOutput: { hookEventName: eventName, additionalContext: advisory } }
-          : { continue: true };
+          ? { ...(emergency.warnings.length ? { warnings: emergency.warnings } : {}), hookSpecificOutput: { hookEventName: eventName, additionalContext: advisory } }
+          : { continue: true, ...(emergency.warnings.length ? { warnings: emergency.warnings } : {}) };
       });
     } catch (error) {
       const classified = errorClass(error);
@@ -776,7 +794,7 @@ export function createLifecycleConsumer(inputDefinition) {
           return await withLock(`${statePath}.lock`, options, async () => {
             const state = loadState(statePath);
             const freshNatural = freshNaturalPeerProgress(natural, state);
-            const advisory = naturalPeerProgressAdvisory(freshNatural);
+            const advisory = [returnSummary, naturalPeerProgressAdvisory(freshNatural)].filter(Boolean).join('\n');
             const nextState = {
               ...state,
               schemaVersion: 1,
@@ -804,8 +822,8 @@ export function createLifecycleConsumer(inputDefinition) {
               injectionArtifact: injection.artifact,
               durationMs: Date.now() - startedAt
             });
-            return advisory ? { hookSpecificOutput: { hookEventName: eventName, additionalContext: advisory } }
-              : { continue: true };
+            return advisory ? { ...(emergency.warnings.length ? { warnings: emergency.warnings } : {}), hookSpecificOutput: { hookEventName: eventName, additionalContext: advisory } }
+              : { continue: true, ...(emergency.warnings.length ? { warnings: emergency.warnings } : {}) };
           });
         } catch (partialError) {
           error = partialError;
@@ -818,7 +836,8 @@ export function createLifecycleConsumer(inputDefinition) {
         errorClass: errorClass(error),
         durationMs: Date.now() - startedAt
       });
-      return { continue: true };
+      return { continue: true, ...(emergency.warnings.length ? { warnings: emergency.warnings } : {}),
+        ...(returnSummary ? { hookSpecificOutput: { hookEventName: eventName, additionalContext: returnSummary } } : {}) };
     }
   }
 

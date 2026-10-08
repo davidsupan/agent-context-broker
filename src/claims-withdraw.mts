@@ -21,7 +21,7 @@ type IndexEntry = { claimId: string; valueHash: string; canonicalRefs?: string[]
 type ScopeEntry = { scopeKey: string; snapshotId: string; snapshotHash: string; version: number; claimIndex: Record<string, IndexEntry>; relationKeys: string[]; canonicalRefs: string[] };
 type State = { schemaVersion: 1; revision: number; updatedAt: string; scopes: Record<string, ScopeEntry>; batches: Record<string, unknown>;
   tombstones?: Record<string, Record<string, { withdrawalId: string; at: string }>>; pendingWithdrawals?: string[];
-  historicalBatches?: Record<string, true> };
+  historicalBatches?: Record<string, true>; withdrawnPublicationIds?: Record<string, { withdrawalId: string; at: string }> };
 type StoredClaim = { claimId: string; claimKey: string; valueHash: string; value: unknown; supersedes: string | null; [field: string]: unknown };
 
 export type WithdrawOptions = {
@@ -110,15 +110,22 @@ function analyse(root: string, state: State, options: WithdrawOptions) {
   const targets: Array<{ claimId: string; claimKey: string; scopeKey: string; chain: StoredClaim[] }> = [];
   for (const claimId of ids) {
     const scope = Object.values(state.scopes).find(entry => Object.values(entry.claimIndex).some(item => item.claimId === claimId));
-    if (!scope) throw new Error(`Claim ${claimId.slice(0, 12)} is not a current accepted claim.`);
+    if (!scope) {
+      const reviews = jsonFiles(join(root, 'review')).map(path => readJson(path, null));
+      const review = reviews.find(r => r?.candidateClaims?.some((c: any) => c.claimId === claimId && typeof c.publicationClaimKey === 'string'));
+      const candidate = review?.candidateClaims.find((c: any) => c.claimId === claimId);
+      if (!candidate) throw new Error(`Claim ${claimId.slice(0, 12)} is not a current accepted claim or pending publication.`);
+      targets.push({ claimId, claimKey: candidate.publicationClaimKey, scopeKey: review.scopeKey, chain: [] });
+      continue;
+    }
     const claimKey = Object.entries(scope.claimIndex).find(([, item]) => item.claimId === claimId)![0];
     targets.push({ claimId, claimKey, scopeKey: scope.scopeKey, chain: versionChain(root, claimId) });
   }
   const removedKeys = new Map<string, Set<string>>();
   for (const t of targets) { if (!removedKeys.has(t.scopeKey)) removedKeys.set(t.scopeKey, new Set()); removedKeys.get(t.scopeKey)!.add(t.claimKey); }
-  const scopes = [...removedKeys.entries()].map(([scopeKey, keys]) => {
+  const scopes = [...removedKeys.entries()].filter(([key]) => state.scopes[key] && targets.some(t => t.scopeKey === key && t.chain.length)).map(([scopeKey, keys]) => {
     const entry = state.scopes[scopeKey]!;
-    const remaining = Object.fromEntries(Object.entries(entry.claimIndex).filter(([key]) => !keys.has(key)));
+    const remaining = Object.fromEntries(Object.entries(entry.claimIndex).filter(([key]) => !targets.some(t => t.scopeKey === scopeKey && t.chain.length && t.claimKey === key)));
     return { scopeKey, entry, remaining };
   });
   const surviving = new Set(Object.entries(state.scopes).flatMap(([scopeKey, entry]) =>
@@ -143,7 +150,7 @@ function analyse(root: string, state: State, options: WithdrawOptions) {
   for (const path of jsonFiles(join(root, 'claims'))) {
     const claim = readJson(path, null) as StoredClaim | null;
     if (!claim || !HASH.test(claim.claimId ?? '') || deleteIds.has(claim.claimId)) continue;
-    const matchingScopes = targets.filter(t => t.claimKey === claim.claimKey).map(t => t.scopeKey);
+    const matchingScopes = targets.filter(t => t.chain.length && t.claimKey === claim.claimKey).map(t => t.scopeKey);
     if (!matchingScopes.length) continue;
     const owners = historical.get(claim.claimId);
     if (owners && matchingScopes.some(scopeKey => owners.has(scopeKey))) deleteIds.add(claim.claimId);
@@ -201,7 +208,7 @@ export async function withdrawClaims(options: WithdrawOptions): Promise<Withdraw
     const previous = jsonFiles(join(root, 'withdrawals')).filter(path => path.endsWith('.manifest.json'))
       .map(path => readJson(path, null) as { claimIds?: string[]; plan?: WithdrawPlan; withdrawalId?: string; snapshots?: Array<{ scopeKey: string; snapshotHash: string | null }> } | null)
       .find(manifest => manifest?.claimIds && options.claimIds.every(id => manifest.claimIds!.includes(id)) && manifest.claimIds.length === options.claimIds.length &&
-        manifest.plan?.claims.every(claim => state.tombstones?.[claim.scopeKey]?.[claim.claimKeyHash ?? '']?.withdrawalId === manifest.withdrawalId));
+        manifest.plan?.claims.every(claim => state.tombstones?.[claim.scopeKey]?.[claim.claimKeyHash ?? '']?.withdrawalId === manifest.withdrawalId || state.withdrawnPublicationIds?.[claim.claimId]?.withdrawalId === manifest.withdrawalId));
     if (previous?.plan && previous.withdrawalId && previous.snapshots) return { ...previous.plan, withdrawalId: previous.withdrawalId, snapshots: previous.snapshots };
     const a = analyse(root, state, options);
     const now = (options.now ?? new Date()).toISOString();
@@ -243,7 +250,9 @@ export async function withdrawClaims(options: WithdrawOptions): Promise<Withdraw
       }
     }
     for (const t of a.targets) {
-      const snapshot = readJson(join(root, 'snapshots', `${a.scopes.find(s => s.scopeKey === t.scopeKey)!.entry.snapshotId}.json`), null) as Record<string, any> | null;
+      const targetScope = a.scopes.find(s => s.scopeKey === t.scopeKey);
+      if (!targetScope) continue;
+      const snapshot = readJson(join(root, 'snapshots', `${targetScope.entry.snapshotId}.json`), null) as Record<string, any> | null;
       const scopeRef = snapshot?.scope && typeof snapshot.scope.key === 'string' ? { kind: snapshot.scope.kind, keyHash: hash(snapshot.scope.key) } : null;
       if (!scopeRef) continue;
       events.push({
@@ -277,7 +286,12 @@ export async function withdrawClaims(options: WithdrawOptions): Promise<Withdraw
     state.tombstones ??= {};
     for (const [scopeKey, keys] of a.removedKeys) {
       state.tombstones[scopeKey] ??= {};
-      for (const key of keys) state.tombstones[scopeKey][hash(key)] = { withdrawalId, at: now };
+      for (const key of keys) if (a.targets.some(t => t.scopeKey === scopeKey && t.claimKey === key && t.chain.length))
+        state.tombstones[scopeKey][hash(key)] = { withdrawalId, at: now };
+    }
+    state.withdrawnPublicationIds ??= {};
+    for (const target of a.targets) {
+      if (!target.chain.length) state.withdrawnPublicationIds[target.claimId] = { withdrawalId, at: now };
     }
     state.pendingWithdrawals = [...(state.pendingWithdrawals ?? []), withdrawalId];
     // Keep stored results byte-for-byte for outbox verification; record history alongside them.

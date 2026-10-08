@@ -1,3 +1,4 @@
+import { prepareEmergency, emergencyUse } from './emergency.mts';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   appendFileSync,
@@ -512,10 +513,13 @@ export function renderContext(result, maxBytes, includePeerProgress = true, noti
   if (result.claims.some((claim) => claim.sensitivity === 'private')) {
     lines.push('Claims marked (private) must not be copied into shared artifacts such as merge requests, issues or wikis.');
   }
+  const claimLines = [];
   for (const claim of result.claims) {
     const value = claim.valueOmitted ? '<value omitted by size limit>' : stableJson(claim.value);
     const label = claim.sensitivity === 'private' ? ' (private)' : '';
-    lines.push(`- ${claim.claimKey}${label}: ${value} [${claim.providers.join('+')}] (${claim.canonicalRefs.join(', ')})`);
+    const line = `- ${claim.claimKey}${label}: ${value} [${claim.providers.join('+')}] (${claim.canonicalRefs.join(', ')})`;
+    claimLines.push({ claimId: claim.claimId, index: lines.length, bytes: Buffer.byteLength(line) });
+    lines.push(line);
   }
   if (result.claims.length === 0) lines.push('No matching accepted claims were found.');
   if (result.teamNotices?.some((/** @type {import('./context-notices.mjs').NoticeView} */ notice) => notice.text)) {
@@ -572,7 +576,20 @@ export function renderContext(result, maxBytes, includePeerProgress = true, noti
     lines.push('No matching live peer progress was found.');
   }
   lines.push('No raw peer conversation, prompt, response, transcript, tool argument, tool result, or native session identifier was imported.');
-  return boundedContext(lines, maxBytes);
+  const rendered = boundedContext(lines, maxBytes);
+  let consumed = 0;
+  let stopped = false;
+  for (const [index, line] of lines.entries()) {
+    const bytes = Buffer.byteLength(`${line}\n`);
+    stopped ||= consumed + bytes > maxBytes;
+    const claim = claimLines.find(item => item.index === index);
+    if (stopped && claim) {
+      const decision = result.trace?.candidates.find((/** @type {any} */ item) => item.claimId === claim.claimId);
+      if (decision) { decision.truncated = true; decision.omittedBytes = claim.bytes; }
+    }
+    if (!stopped) consumed += bytes;
+  }
+  return rendered;
 }
 
 function queryAudit(result, options, auditId) {
@@ -657,7 +674,7 @@ function threadLedgerPath(threadAuditRoot, threadRef) {
 
 /** @param {any} inputOptions */
 async function buildContextQuery(inputOptions = {}) {
-  const options = { ...DEFAULTS, ...inputOptions };
+  const options = prepareEmergency({ ...DEFAULTS, ...inputOptions });
   if (!PROVIDERS.has(options.provider)) throw new Error(`Unsupported provider: ${options.provider}.`);
   const profiles = options.profiles ?? loadContextProfiles(options.profilesPath);
   const route = routeContextProfile({
@@ -665,7 +682,7 @@ async function buildContextQuery(inputOptions = {}) {
     profileId: options.profileId,
     taskKind: options.taskKind,
     projectScope: options.projectScope,
-    strictIsolation: options.strictIsolation
+    strictIsolation: options.strictIsolation || (options.env ?? process.env).AGENT_CONTEXT_BROKER_STRICT_ISOLATION === '1'
   });
   const now = options.now ? new Date(options.now) : new Date();
   if (Number.isNaN(now.getTime())) throw new Error('Context query time is invalid.');
@@ -681,7 +698,7 @@ async function buildContextQuery(inputOptions = {}) {
     strictIsolation: route.profile?.id === 'strict-isolation',
     claims: [],
     peerProgress: [],
-    warnings: [],
+    warnings: [...options.emergency.warnings],
     context: '',
     ...(trace ? { trace } : {}),
     injection: { payload: '', digest: null, persisted: false, artifact: null },
@@ -852,15 +869,20 @@ async function buildContextQuery(inputOptions = {}) {
 }
 
 export async function planContextQuery(options) {
-  return buildContextQuery(options);
+  return buildContextQuery({ ...options, execute: false });
 }
 
 export async function runContextQuery(inputOptions) {
-  const options = { ...DEFAULTS, ...inputOptions };
+  const options = prepareEmergency({ ...DEFAULTS, ...inputOptions });
   if (options.execute !== true || !options.globalAuditDirectory) {
     throw new Error('Audited context query requires execute: true and globalAuditDirectory.');
   }
   const result = await buildContextQuery({ ...options, trace: true });
+  try { emergencyUse(options, options.emergency, 'query', result); }
+  catch (error) {
+    result.warnings.push('emergency-ledger-append-failed');
+    if (error instanceof Error && error.message === 'emergency-ledger-invalid') result.warnings.push('emergency-ledger-invalid');
+  }
   const output = { ...result };
   if (!options.trace) delete output.trace;
   if (result.strictIsolation) {

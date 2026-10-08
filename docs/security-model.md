@@ -188,3 +188,36 @@ rule ids, local trust assumptions and host responsibilities.
 Do not open a public issue for a suspected vulnerability that contains secrets,
 private transcript data, or exploit details. Contact the maintainer privately
 through the security reporting channel configured on the GitHub repository.
+
+## Emergency ledger
+
+Emergency access is an operator-controlled policy exception, limited by an
+absolute expiry. Caller-requested strict isolation still wins. The append-only
+`emergency/grants.jsonl` hash chain binds the recorded ordering, grant metadata,
+and metadata-only use records. A separate local `head.json` checkpoint detects
+removal of the final record or of the ledger alone. Modified lines, missing
+interior lines, reordering, missing checkpoints and partial appends fail closed
+to ordinary provider policy. No automatic repair is attempted. A crash between
+the ledger append and checkpoint replacement can therefore require operator
+investigation even if the preceding records were legitimate.
+
+The ledger proves internal consistency against the local checkpoint, not who
+performed an operation or whether an operator's stated reason is true. Anyone
+who can write the runtime home can also write the ledger and checkpoint, recompute
+the chain, or restore both from an earlier copy. The hash chain makes edits
+evident, not impossible. It is not an external signature, trusted timestamp,
+remote attestation or protection against a malicious local writer.
+
+Publication use records are durable write-ahead reservations. Storage failures
+after reservation may leave a recorded attempt with no persisted claim; reports
+resolve current accepted, pending, withdrawn or not-persisted state instead of
+claiming the ledger alone proves commitment. Query ledger failures are warnings;
+they do not withhold an otherwise permitted answer. The ledger covers broker
+commands, not arbitrary provider filesystem reads or writes. It contains claim
+keys and ids but never claim values or payload text. Operator-supplied reasons
+are stored verbatim, so they should describe the handover without private content.
+
+Injection audit payloads are separate local artifacts and can contain rendered
+context. Manual `audit prune` deletes only eligible old injection files, without
+changing the emergency ledger or other audit records. Runtime-home filesystem
+permissions remain the trust boundary for both storage and pruning.

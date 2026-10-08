@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { runEmergencyCommand } from './emergency-cli.mts';
 
 import { readFileSync } from 'node:fs';
 
@@ -300,7 +301,9 @@ function parseArgs(argv) {
   return options;
 }
 
-if (process.argv[2] === 'context-notices') {
+if (['emergency', 'audit'].includes(process.argv[2])) {
+  process.exitCode = runEmergencyCommand(process.argv[2], process.argv.slice(3));
+} else if (process.argv[2] === 'context-notices') {
   process.exitCode = runContextNoticesCommand(process.argv.slice(3));
 } else if (['capabilities', 'claims-export'].includes(process.argv[2])) {
   process.exitCode = runClaimsCommand(process.argv[2], process.argv.slice(3));
@@ -445,5 +448,7 @@ if (process.argv[2] === 'context-notices') {
   }
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));
-  process.exitCode = 1;
+  const warnings = /** @type {any} */ (error)?.warnings;
+  if (warnings?.length) console.error(JSON.stringify({ warnings }));
+  process.exitCode = warnings?.includes('emergency-ledger-invalid') ? 3 : 1;
 }

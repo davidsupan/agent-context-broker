@@ -1,3 +1,4 @@
+import { prepareEmergency, emergencyUse } from './emergency.mts';
 import { sha256, stableJson } from './event-store.mjs';
 import {
   currentScopeContext,
@@ -81,7 +82,10 @@ export function buildClaimBatch(inputOptions = {}) {
   };
 }
 
+/** @param {any} inputOptions */
 export function planContextPublication(inputOptions = {}) {
+  inputOptions = prepareEmergency({ ...inputOptions, execute: false });
+  if (inputOptions.strictIsolation || (inputOptions.env ?? process.env).AGENT_CONTEXT_BROKER_STRICT_ISOLATION === '1' || inputOptions.profileId === 'strict-isolation') throw new Error('Publication is unavailable in strict isolation.');
   const batch = buildClaimBatch(inputOptions);
   const source = provenanceForSourceToken({
     runtimeRoot: inputOptions.eventRuntimeRoot,
@@ -90,13 +94,17 @@ export function planContextPublication(inputOptions = {}) {
   return {
     ...planReconciliation({ ...inputOptions, batch }),
     mode: 'context-publication',
+    ...(inputOptions.emergency?.warnings.length ? { warnings: inputOptions.emergency.warnings } : {}),
     sourceTokenHash: sha256(inputOptions.proposal.sourceToken),
     proposalIdHash: sha256(inputOptions.proposal.proposalId),
     threadRef: source.threadRef
   };
 }
 
+/** @param {any} inputOptions */
 export async function publishContext(inputOptions = {}) {
+  inputOptions = prepareEmergency(inputOptions);
+  if (inputOptions.strictIsolation || (inputOptions.env ?? process.env).AGENT_CONTEXT_BROKER_STRICT_ISOLATION === '1' || inputOptions.profileId === 'strict-isolation') throw new Error('Publication is unavailable in strict isolation.');
   if (inputOptions.execute !== true) {
     throw new Error('Context publication writes require execute: true.');
   }
@@ -108,6 +116,11 @@ export async function publishContext(inputOptions = {}) {
   const result = await reconcileClaimBatch({
     ...inputOptions,
     batch,
+    beforePublication: inputOptions.emergency.grant ? (/** @type {any} */ metadata) => emergencyUse(inputOptions, inputOptions.emergency, 'publish', {
+      ...metadata, scopes: batch.relationKeys.map(relationKey => ({ relationKey, kind: relationKey.split(':')[0] })),
+      publishedClaimKeys: metadata.writes.map((/** @type {any} */ w) => w.claimKey), claimIds: metadata.writes.map((/** @type {any} */ w) => w.claimId),
+      claimKeys: metadata.writes.map((/** @type {any} */ w) => w.claimKey)
+    }) : undefined,
     requireSourceAttestation: true,
     attestationRuntimeRoot: inputOptions.eventRuntimeRoot,
     eventRuntimeRoot: inputOptions.eventRuntimeRoot,
@@ -115,6 +128,7 @@ export async function publishContext(inputOptions = {}) {
   });
   return {
     ...result,
+    warnings: inputOptions.emergency.warnings,
     mode: 'context-publication',
     sourceTokenHash: sha256(inputOptions.proposal.sourceToken),
     proposalIdHash: sha256(inputOptions.proposal.proposalId),

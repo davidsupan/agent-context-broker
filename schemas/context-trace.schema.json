@@ -549,6 +549,13 @@
             },
             "decision": {
               "const": "included"
+            },
+            "truncated": {
+              "const": true
+            },
+            "omittedBytes": {
+              "type": "integer",
+              "minimum": 0
             }
           }
         },
@@ -619,6 +626,13 @@
                 "claim-cap",
                 "tombstoned"
               ]
+            },
+            "truncated": {
+              "const": true
+            },
+            "omittedBytes": {
+              "type": "integer",
+              "minimum": 0
             }
           }
         }
@@ -712,6 +726,13 @@
             "claim-cap",
             "term-miss"
           ]
+        },
+        "truncated": {
+          "const": true
+        },
+        "omittedBytes": {
+          "type": "integer",
+          "minimum": 0
         }
       }
     },
@@ -784,6 +805,30 @@
         "limit": {
           "type": "integer",
           "minimum": 0
+        },
+        "claims": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "claimId",
+              "truncated",
+              "omittedBytes"
+            ],
+            "properties": {
+              "claimId": {
+                "type": "string"
+              },
+              "truncated": {
+                "const": true
+              },
+              "omittedBytes": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
         }
       }
     }

@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "chainVerified": true,
+  "grants": [
+    {
+      "grantId": "fixture-closed",
+      "provider": "codex",
+      "reason": "Temporary capacity handover",
+      "trigger": "manual",
+      "window": null,
+      "openedAt": "2026-10-08T10:00:00.000Z",
+      "expiresAt": "2026-10-08T15:00:00.000Z",
+      "closedAt": "2026-10-08T11:00:00.000Z",
+      "expiredAt": null,
+      "supersededAt": null,
+      "closeReason": "primary-restored",
+      "state": "closed",
+      "durationMs": 3600000,
+      "counts": {
+        "queries": 2,
+        "publishes": 1,
+        "progress": 1,
+        "refreshes": 0,
+        "claimsRead": 2,
+        "teamNotices": 0,
+        "bytes": 3015
+      },
+      "scopes": [
+        "project:af2bdbe1aa9b6ec1e2ade1d694f41fc71a831d0268e9891562113d8a62add1bf"
+      ],
+      "claimKeysRead": [
+        "sample.rule"
+      ],
+      "claimKeysPublished": [
+        "sample.rule"
+      ],
+      "peerProgressIds": [
+        "251703560dd2e420f4ae12841281fc24dff463a408b39e2914d18b7ee368e082"
+      ],
+      "teamNoticeIds": [],
+      "writes": [
+        {
+          "claimId": "cf2a65f21eb8955ba661d766b79c59f887c3fb19e787556175e2fe1c9ba33e76",
+          "claimKey": "sample.rule",
+          "state": "accepted"
+        }
+      ]
+    },
+    {
+      "grantId": "fixture-open",
+      "provider": "codex",
+      "reason": "Temporary capacity handover",
+      "trigger": "manual",
+      "window": null,
+      "openedAt": "2026-10-08T12:00:00.000Z",
+      "expiresAt": "2026-10-08T15:00:00.000Z",
+      "closedAt": null,
+      "expiredAt": null,
+      "supersededAt": null,
+      "closeReason": null,
+      "state": "open",
+      "durationMs": 3600000,
+      "counts": {
+        "queries": 0,
+        "publishes": 0,
+        "progress": 0,
+        "refreshes": 0,
+        "claimsRead": 0,
+        "teamNotices": 0,
+        "bytes": 0
+      },
+      "scopes": [],
+      "claimKeysRead": [],
+      "claimKeysPublished": [],
+      "peerProgressIds": [],
+      "teamNoticeIds": [],
+      "writes": []
+    }
+  ]
+}
