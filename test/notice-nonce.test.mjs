@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { after, before, test } from 'node:test';
-import { constants, existsSync, linkSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { constants, existsSync, linkSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { join, win32 } from 'node:path';
 import { PENDING_NOTICE_NONCE, sealNoticeLane } from '../src/notice-nonce.mjs';
 import { noticeWorkers } from './notice-fixtures.mjs';
@@ -99,4 +101,121 @@ test('concurrent win32 fallback creators keep one secret and run the failing ACL
   }
   assert.equal(readFileSync(join(home, 'team-shared/nonce-secret')).length, 32);
   assert.deepEqual(readdirSync(join(home, 'team-shared')).sort(), ['nonce-secret', 'nonce-secret.acl-unverified']);
+});
+
+test('stale creation lock is reclaimed promptly and the nonce stays deterministic', () => {
+  const home = mkdtempSync(join(root, 'home-'));
+  const lock = join(home, 'team-shared/.nonce-lock');
+  mkdirSync(lock, { recursive: true });
+  const old = new Date(Date.now() - 120000);
+  utimesSync(lock, old, old);
+  let spawns = 0;
+  const dependencies = { platform: 'win32', host, spawn() { spawns++; } };
+  const start = performance.now();
+  const first = render(home, dependencies);
+  const second = render(home, dependencies);
+  assert.ok(performance.now() - start < 1000, 'stale lock recovery must not wait');
+  assert.deepEqual(first.warnings, ['team-shared-secret-lock-reclaimed']);
+  assert.deepEqual(second.warnings, []);
+  assert.deepEqual(first.lane, second.lane);
+  assert.deepEqual(first.notices, second.notices);
+  assert.equal(spawns, 1);
+  assert.equal(readFileSync(join(home, 'team-shared/nonce-secret')).length, 32);
+  assert.ok(!existsSync(lock));
+});
+
+for (const stale of [false, true]) test(`complete secret bypasses a ${stale ? 'stale' : 'fresh'} lock without touching it`, () => {
+  const home = mkdtempSync(join(root, 'home-'));
+  const dependencies = { platform: 'win32', host, spawn() {} };
+  const first = render(home, dependencies);
+  const lock = join(home, 'team-shared/.nonce-lock');
+  mkdirSync(lock);
+  if (stale) {
+    const old = new Date(Date.now() - 120000);
+    utimesSync(lock, old, old);
+  }
+  const before = statSync(lock);
+  const start = performance.now();
+  assert.deepEqual(render(home, { platform: 'win32', waitMs: 0 }), first);
+  assert.ok(performance.now() - start < 1000, 'complete secret reads must not wait');
+  assert.equal(statSync(lock).mtimeMs, before.mtimeMs);
+  assert.equal(statSync(lock).ino, before.ino);
+});
+
+for (const empty of [false, true]) test(`fresh lock held by another process waits without replacing ${empty ? 'an empty' : 'a missing'} secret`, async () => {
+  const home = mkdtempSync(join(root, 'home-'));
+  const lock = join(home, 'team-shared/.nonce-lock');
+  const path = join(home, 'team-shared/nonce-secret');
+  mkdirSync(join(home, 'team-shared'));
+  if (empty) writeFileSync(path, '');
+  const child = spawn(process.execPath, ['--input-type=module', '-e', `
+    import { mkdirSync } from 'node:fs';
+    mkdirSync(process.argv[1]);
+    process.send('locked');
+    process.on('message', () => process.exit(0));
+  `, lock], { stdio: ['ignore', 'ignore', 'pipe', 'ipc'], windowsHide: true });
+  try {
+    await once(child, 'message');
+    const before = statSync(lock);
+    let spawns = 0;
+    const start = performance.now();
+    const result = render(home, { platform: 'win32', waitMs: 80, spawn() { spawns++; } });
+    const elapsed = performance.now() - start;
+    assert.ok(elapsed >= 70 && elapsed < 1000, `expected short lock wait, got ${elapsed} ms`);
+    assert.deepEqual(result.warnings, ['team-shared-nonce-ephemeral']);
+    assert.equal(spawns, 0);
+    assert.equal(statSync(lock).mtimeMs, before.mtimeMs);
+    assert.equal(existsSync(path), empty);
+    if (empty) assert.equal(statSync(path).size, 0);
+  } finally {
+    const exited = once(child, 'exit');
+    child.kill();
+    await exited;
+  }
+});
+
+test('empty interrupted secret without a lock is recreated with a warning', () => {
+  const home = mkdtempSync(join(root, 'home-'));
+  mkdirSync(join(home, 'team-shared'));
+  const path = join(home, 'team-shared/nonce-secret');
+  writeFileSync(path, '');
+  let spawns = 0;
+  const dependencies = { platform: 'win32', host, spawn() { spawns++; } };
+  const first = render(home, dependencies);
+  assert.deepEqual(first.warnings, ['team-shared-secret-recreated']);
+  assert.equal(statSync(path).size, 32);
+  const second = render(home, dependencies);
+  assert.deepEqual(second.lane, first.lane);
+  assert.deepEqual(second.warnings, []);
+  assert.equal(spawns, 1);
+});
+
+test('concurrent readers recreate a zero-byte leftover behind a stale lock exactly once', async () => {
+  const home = mkdtempSync(join(root, 'home-'));
+  const lock = join(home, 'team-shared/.nonce-lock');
+  mkdirSync(lock, { recursive: true });
+  const old = new Date(Date.now() - 120000);
+  utimesSync(lock, old, old);
+  writeFileSync(join(home, 'team-shared/nonce-secret'), '');
+  const results = await noticeWorkers(Array.from({ length: 4 }, () => ({ operation: 'seal', home })));
+  assert.equal(results.reduce((sum, result) => sum + result.spawns, 0), 1);
+  const warnings = results.flatMap((result) => result.warnings);
+  assert.ok(warnings.includes('team-shared-secret-lock-reclaimed'));
+  assert.equal(warnings.filter((warning) => warning === 'team-shared-secret-recreated').length, 1);
+  for (const result of results) {
+    assert.ok(!result.warnings.includes('team-shared-nonce-ephemeral'));
+    assert.deepEqual(result.lane, results[0].lane);
+    assert.deepEqual(result.notices, results[0].notices);
+  }
+  assert.equal(statSync(join(home, 'team-shared/nonce-secret')).size, 32);
+  assert.deepEqual(readdirSync(join(home, 'team-shared')).sort(), ['nonce-secret', 'nonce-secret.acl-unverified']);
+});
+
+test('a secret directory stays fail closed without acquiring a lock', () => {
+  const home = mkdtempSync(join(root, 'home-'));
+  const path = join(home, 'team-shared/nonce-secret');
+  mkdirSync(path, { recursive: true });
+  assert.deepEqual(render(home, { platform: 'win32' }).warnings, ['team-shared-nonce-ephemeral']);
+  assert.ok(statSync(path).isDirectory());
+  assert.ok(!existsSync(join(home, 'team-shared/.nonce-lock')));
 });
