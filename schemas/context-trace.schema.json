@@ -1,0 +1,747 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-context-broker.invalid/schemas/agent-context/context-trace.schema.json",
+  "title": "Context decision trace",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "scopes",
+    "snapshots",
+    "candidates",
+    "nearMisses",
+    "peerProgress",
+    "policy",
+    "budget",
+    "layers"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "scopes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "relationKey",
+          "role"
+        ],
+        "properties": {
+          "relationKey": {
+            "$ref": "#/$defs/scopeRelationKey"
+          },
+          "role": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "snapshots": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "snapshotId",
+              "scopeKind",
+              "role",
+              "rank",
+              "selected"
+            ],
+            "properties": {
+              "snapshotId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "scopeKind": {
+                "enum": [
+                  "global",
+                  "project",
+                  "workstream",
+                  "ticket",
+                  "merge-request",
+                  null
+                ]
+              },
+              "role": {
+                "type": "string",
+                "minLength": 1
+              },
+              "rank": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "selected": {
+                "const": true
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "snapshotId",
+              "scopeKind",
+              "role",
+              "rank",
+              "selected",
+              "reason"
+            ],
+            "properties": {
+              "snapshotId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "scopeKind": {
+                "enum": [
+                  "global",
+                  "project",
+                  "workstream",
+                  "ticket",
+                  "merge-request",
+                  null
+                ]
+              },
+              "role": {
+                "type": "string",
+                "minLength": 1
+              },
+              "rank": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "selected": {
+                "const": false
+              },
+              "reason": {
+                "enum": [
+                  "snapshot-cap",
+                  "unreadable"
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    "candidates": {
+      "type": "array",
+      "items": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/claim"
+          },
+          {
+            "$ref": "#/$defs/readLimit"
+          }
+        ]
+      }
+    },
+    "nearMisses": {
+      "type": "array",
+      "maxItems": 5,
+      "items": {
+        "$ref": "#/$defs/nearMiss"
+      }
+    },
+    "peerProgress": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "progressId",
+              "score",
+              "decision"
+            ],
+            "properties": {
+              "progressId": {
+                "$ref": "#/$defs/hash"
+              },
+              "score": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "decision": {
+                "const": "included"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "progressId",
+              "score",
+              "decision",
+              "reason"
+            ],
+            "properties": {
+              "progressId": {
+                "$ref": "#/$defs/hash"
+              },
+              "score": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "decision": {
+                "const": "excluded"
+              },
+              "reason": {
+                "enum": [
+                  "expired",
+                  "stale-relation",
+                  "cap",
+                  "provider",
+                  "relation",
+                  "term-miss",
+                  "already-delivered"
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    "policy": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "relationKey",
+          "reason"
+        ],
+        "properties": {
+          "relationKey": {
+            "$ref": "#/$defs/relationKey"
+          },
+          "reason": {
+            "enum": [
+              "query-denied",
+              "ambient-project-denied",
+              "ambient-global-denied",
+              "scope-denied"
+            ]
+          }
+        }
+      }
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "maxSnapshots",
+        "maxClaims",
+        "maxContextBytes",
+        "renderedContextBytes"
+      ],
+      "properties": {
+        "maxSnapshots": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxClaims": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxContextBytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "renderedContextBytes": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "layers": {
+      "type": "array",
+      "minItems": 9,
+      "maxItems": 9,
+      "prefixItems": [
+        {
+          "allOf": [
+            {
+              "$ref": "#/$defs/layer"
+            },
+            {
+              "properties": {
+                "id": {
+                  "const": "accepted-primary"
+                }
+              },
+              "type": "object"
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/$defs/layer"
+            },
+            {
+              "properties": {
+                "id": {
+                  "const": "accepted-ambient-project"
+                }
+              },
+              "type": "object"
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/$defs/layer"
+            },
+            {
+              "properties": {
+                "id": {
+                  "const": "accepted-ambient-global"
+                }
+              },
+              "type": "object"
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/$defs/layer"
+            },
+            {
+              "properties": {
+                "id": {
+                  "const": "accepted-related"
+                }
+              },
+              "type": "object"
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/$defs/layer"
+            },
+            {
+              "properties": {
+                "id": {
+                  "const": "peer-progress"
+                }
+              },
+              "type": "object"
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/$defs/layer"
+            },
+            {
+              "properties": {
+                "id": {
+                  "const": "notices"
+                }
+              },
+              "type": "object"
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/$defs/layer"
+            },
+            {
+              "properties": {
+                "id": {
+                  "const": "artifact-evidence"
+                }
+              },
+              "type": "object"
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/$defs/layer"
+            },
+            {
+              "properties": {
+                "id": {
+                  "const": "policy"
+                }
+              },
+              "type": "object"
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/$defs/layer"
+            },
+            {
+              "properties": {
+                "id": {
+                  "const": "budget"
+                },
+                "limit": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "state": {
+                  "const": "used"
+                },
+                "excluded": {
+                  "const": 0
+                },
+                "detail": {
+                  "const": "budget"
+                }
+              },
+              "required": [
+                "limit"
+              ],
+              "type": "object"
+            }
+          ]
+        }
+      ],
+      "items": false
+    },
+    "lifecycle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "advisoryReferences",
+        "claimsInjected"
+      ],
+      "properties": {
+        "advisoryReferences": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "claimsInjected": {
+          "const": 0
+        }
+      }
+    }
+  },
+  "$defs": {
+    "hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "relationKey": {
+      "type": "string",
+      "pattern": "^(global|project|workstream|ticket|merge-request):[a-f0-9]{64}$"
+    },
+    "claim": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "claimId",
+            "claimKey",
+            "claimType",
+            "subject",
+            "predicate",
+            "snapshotId",
+            "score",
+            "decision"
+          ],
+          "properties": {
+            "claimId": {
+              "$ref": "#/$defs/hash"
+            },
+            "claimKey": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "claimType": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "subject": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "predicate": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "snapshotId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "score": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "decision": {
+              "const": "included"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "claimId",
+            "claimKey",
+            "claimType",
+            "subject",
+            "predicate",
+            "snapshotId",
+            "score",
+            "decision",
+            "reason"
+          ],
+          "properties": {
+            "claimId": {
+              "$ref": "#/$defs/hash"
+            },
+            "claimKey": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "claimType": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "subject": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "predicate": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "snapshotId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "score": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "decision": {
+              "const": "excluded"
+            },
+            "reason": {
+              "enum": [
+                "stale",
+                "expired",
+                "claim-type",
+                "provider",
+                "private-other-provider",
+                "relation",
+                "term-miss",
+                "claim-cap",
+                "tombstoned"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "readLimit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "snapshotId",
+        "count",
+        "score",
+        "decision",
+        "reason"
+      ],
+      "properties": {
+        "snapshotId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "score": {
+          "type": "null"
+        },
+        "decision": {
+          "const": "excluded"
+        },
+        "reason": {
+          "const": "read-limit"
+        }
+      }
+    },
+    "nearMiss": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "claimId",
+        "claimKey",
+        "claimType",
+        "subject",
+        "predicate",
+        "snapshotId",
+        "score",
+        "decision",
+        "reason"
+      ],
+      "properties": {
+        "claimId": {
+          "$ref": "#/$defs/hash"
+        },
+        "claimKey": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "claimType": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "subject": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "predicate": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "snapshotId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "score": {
+          "type": "number",
+          "minimum": 0
+        },
+        "decision": {
+          "const": "excluded"
+        },
+        "reason": {
+          "enum": [
+            "claim-cap",
+            "term-miss"
+          ]
+        }
+      }
+    },
+    "scopeRelationKey": {
+      "type": "string",
+      "pattern": "^(global|project|workstream|ticket|merge-request|workspace|repository|branch|parent|source):[a-f0-9]{64}$"
+    },
+    "layer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "state",
+        "included",
+        "excluded",
+        "reasons",
+        "detail"
+      ],
+      "properties": {
+        "id": {
+          "enum": [
+            "accepted-primary",
+            "accepted-ambient-project",
+            "accepted-ambient-global",
+            "accepted-related",
+            "peer-progress",
+            "notices",
+            "artifact-evidence",
+            "policy",
+            "budget"
+          ]
+        },
+        "state": {
+          "enum": [
+            "used",
+            "empty",
+            "off",
+            "denied",
+            "error"
+          ]
+        },
+        "included": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "excluded": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reasons": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "detail": {
+          "enum": [
+            "candidates",
+            "peerProgress",
+            "policy",
+            "budget",
+            "notices",
+            "artifacts",
+            null
+          ]
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

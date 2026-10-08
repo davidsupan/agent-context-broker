@@ -516,7 +516,13 @@ function directHierarchyWeight(relationship) {
 }
 
 function progressScore(artifact, options, relations, terms) {
-  if (!options.crossProvider && artifact.provider !== options.provider) return -1;
+  return progressRelevance(artifact, options, relations, terms).score;
+}
+
+/** @param {any} artifact @param {any} options @param {any[]} relations @param {string[]} terms
+ * @returns {{ score: number, reason: 'provider' | 'relation' | 'term-miss' | null }} */
+function progressRelevance(artifact, options, relations, terms) {
+  if (!options.crossProvider && artifact.provider !== options.provider) return { score: -1, reason: 'provider' };
   let score = 0;
   let structurallyRelated = false;
   if (artifact.scope.kind === options.scopeKind && artifact.scope.key === options.scopeKey) {
@@ -547,7 +553,7 @@ function progressScore(artifact, options, relations, terms) {
       structurallyRelated = true;
     }
   }
-  if (['ticket', 'merge-request'].includes(options.scopeKind) && !structurallyRelated) return -1;
+  if (['ticket', 'merge-request'].includes(options.scopeKind) && !structurallyRelated) return { score: -1, reason: 'relation' };
   const haystack = stableJson({
     scope: artifact.scope,
     work: artifact.work,
@@ -563,10 +569,11 @@ function progressScore(artifact, options, relations, terms) {
       artifact.scope.kind === 'project' &&
       artifact.scope.key === options.scopeKey &&
       termMatches === 0) {
-    return -1;
+    return { score: -1, reason: 'term-miss' };
   }
   if (termMatches > 0) score += termMatches * 4;
-  return score >= 8 || termMatches > 0 ? score : -1;
+  return score >= 8 || termMatches > 0 ? { score, reason: null }
+    : { score: -1, reason: structurallyRelated ? 'term-miss' : 'relation' };
 }
 
 function currentArtifactRelations(artifact, options) {
@@ -619,39 +626,58 @@ function markConflicts(items) {
   });
 }
 
+/** @param {any} inputOptions */
 export function readPeerProgress(inputOptions = {}) {
   const options = { ...DEFAULTS, crossProvider: true, ...inputOptions };
   if (!options.runtimeRoot || !options.eventRuntimeRoot || !PROVIDERS.has(options.provider) ||
       !validScope({ kind: options.scopeKind, key: options.scopeKey })) {
     throw new Error('Peer progress query requires provider, roots, and an explicit scope.');
   }
-  if (options.strictIsolation === true) return { progress: [], warnings: [] };
+  if (options.strictIsolation === true) return { progress: [], warnings: [], decisions: [] };
   const rule = policyEntry(options.providerPolicy, options.provider);
   if (rule && (rule.strictIsolation || !scopeReadable(rule, { kind: options.scopeKind, key: options.scopeKey }))) {
-    return { progress: [], warnings: ['provider-policy-denied'] };
+    options.decisionTrace?.policy.push({ relationKey: relationKey({ kind: options.scopeKind, key: options.scopeKey }), reason: 'query-denied' });
+    return { progress: [], warnings: ['provider-policy-denied'], decisions: [] };
   }
   if (rule?.read && options.ambientProjectKey &&
       !scopeReadable(rule, { kind: 'project', key: options.ambientProjectKey })) {
+    options.decisionTrace?.policy.push({ relationKey: relationKey({ kind: 'project', key: options.ambientProjectKey }), reason: 'ambient-project-denied' });
     options.ambientProjectKey = null;
   }
   const now = options.now ? new Date(options.now) : new Date();
   if (Number.isNaN(now.getTime())) throw new Error('Peer progress query time is invalid.');
   const terms = [...new Set((options.terms ?? []).map((term) => String(term).trim().toLowerCase()).filter(Boolean))];
   const relations = queryRelations(options);
+  if (options.decisionTrace) options.decisionTrace.scopes = relations.map(item => ({
+    relationKey: relationKey(item), role: item.relationship
+  }));
   const warnings = [];
   const candidates = [];
+  /** @type {import('./context-trace.mts').PeerDecision[]} */
+  const decisions = [];
   for (const event of currentProgressEvents(options.eventRuntimeRoot)) {
     const artifact = verifiedArtifact(options.runtimeRoot, event);
     const current = currentArtifactRelations(artifact, options);
     const previousScore = progressScore(artifact, options, relations, terms);
-    const score = progressScore(current.artifact, options, relations, terms);
+    const relevance = progressRelevance(current.artifact, options, relations, terms);
+    const score = relevance.score;
     if (current.staleRelations.length > 0 && previousScore >= 0) {
       warnings.push('stale-peer-relation-excluded');
     }
-    if (score < 0) continue;
-    if (rule?.read && !scopeReadable(rule, artifact.scope)) continue;
+    const decision = { progressId: artifact.progressId, score: score < 0 ? null : score, decision: 'excluded' };
+    if (score < 0) {
+      const reason = current.staleRelations.length > 0 && previousScore >= 0 ? 'stale-relation'
+        : relevance.reason ?? 'relation';
+      decisions.push({ ...decision, decision: 'excluded', reason });
+      continue;
+    }
+    if (rule?.read && !scopeReadable(rule, artifact.scope)) {
+      decisions.push({ ...decision, decision: 'excluded', reason: 'provider' });
+      continue;
+    }
     if (Date.parse(artifact.expiresAt) <= now.getTime()) {
       warnings.push('expired-peer-progress-excluded');
+      decisions.push({ ...decision, decision: 'excluded', reason: 'expired' });
       continue;
     }
     candidates.push({
@@ -685,8 +711,12 @@ export function readPeerProgress(inputOptions = {}) {
     left.progressId.localeCompare(right.progressId)
   );
   if (candidates.length > options.maxProgress) warnings.push('peer-progress-limit-reached');
+  candidates.forEach((item, index) => decisions.push({ progressId: item.progressId, score: item.relevance,
+    decision: index < options.maxProgress ? 'included' : 'excluded',
+    ...(index < options.maxProgress ? {} : { reason: 'cap' }) }));
   return {
     progress: markConflicts(candidates.slice(0, options.maxProgress)),
+    decisions,
     warnings: [...new Set(warnings)].sort()
   };
 }

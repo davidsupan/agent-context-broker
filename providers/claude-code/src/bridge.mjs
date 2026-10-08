@@ -29,6 +29,8 @@ const consumer = createLifecycleConsumer({
     join(runtimeHome, 'runtime', 'claude-lifecycle'),
   eventRuntimeRoot: process.env.AGENT_CONTEXT_BROKER_EVENT_RUNTIME ??
     join(runtimeHome, 'runtime', 'events'),
+  globalAuditDirectory: process.env.AGENT_CONTEXT_BROKER_GLOBAL_AUDIT_DIR ??
+    join(runtimeHome, 'runtime', 'query-audit'),
   reviewLedgersRoot: process.env.AGENT_CONTEXT_BROKER_REVIEW_LEDGERS_ROOT ??
     join(runtimeHome, 'runtime', 'reviews'),
   defaultProjectKey: process.env.AGENT_CONTEXT_BROKER_DEFAULT_PROJECT ?? null,

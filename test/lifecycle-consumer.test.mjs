@@ -60,6 +60,7 @@ function consumer(provider, runtimeRoot) {
     adapterModule: isClaude ? 'claude-inventory.mjs' : 'codex-inventory-v2.mjs',
     adapterRoot: packageRoot,
     runtimeRoot,
+    globalAuditDirectory: join(runtimeRoot, 'query-audit'),
     supportedEvents: isClaude
       ? ['SessionStart', 'UserPromptSubmit', 'SessionEnd']
       : ['SessionStart', 'UserPromptSubmit'],
@@ -134,8 +135,8 @@ describe('provider-neutral lifecycle consumer', () => {
       provenanceForSourceToken({ runtimeRoot: join(runtime, '..', 'events'), sourceToken }).provider,
       'codex'
     );
-    const injectionPath = readdirSync(join(runtime, 'injections'))
-      .map((name) => join(runtime, 'injections', name))[0];
+    const injectionPath = readdirSync(join(runtime, 'query-audit', 'injections')).sort()
+      .map((name) => join(runtime, 'query-audit', 'injections', name))[0];
     const injection = JSON.parse(readFileSync(injectionPath, 'utf8'));
     assert.equal(injection.payload, first.hookSpecificOutput.additionalContext);
     assert.deepEqual(replay, { continue: true });
@@ -228,6 +229,7 @@ describe('provider-neutral lifecycle consumer', () => {
       adapterRoot: packageRoot,
       runtimeRoot: runtime,
       eventRuntimeRoot: eventRuntime,
+      globalAuditDirectory: join(runtime, 'query-audit'),
       contextRuntimeRoot: contextRuntime,
       ticketPackagesRoot: ticketPackages,
       supportedEvents: ['UserPromptSubmit'],
@@ -259,13 +261,15 @@ describe('provider-neutral lifecycle consumer', () => {
     assert.deepEqual(ambiguous, { continue: true });
     assert.equal(runtimeText(runtime).includes('RAW_PROMPT_MUST_NOT_PERSIST'), false);
     assert.equal(runtimeText(runtime).includes('Compare workstream'), false);
-    const injections = readdirSync(join(runtime, 'injections')).map((name) =>
-      JSON.parse(readFileSync(join(runtime, 'injections', name), 'utf8'))
+    const injections = readdirSync(join(runtime, 'query-audit', 'injections')).map((name) =>
+      JSON.parse(readFileSync(join(runtime, 'query-audit', 'injections', name), 'utf8'))
     );
-    assert.equal(injections.length, 1);
-    assert.equal(injections[0].payload, context);
+    assert.equal(injections.length, 2);
+    const deliveredInjection = injections.find((item) => item.payload === context);
+    assert.ok(deliveredInjection);
+    assert.equal(injections.filter((item) => item.payload === '').length, 1);
     assert.equal(
-      injections[0].digest,
+      deliveredInjection.digest,
       createHash('sha256').update(context, 'utf8').digest('hex')
     );
     const audit = readdirSync(join(runtime, 'audit')).map((name) =>
@@ -277,7 +281,8 @@ describe('provider-neutral lifecycle consumer', () => {
     assert.equal(partial.peerProgressCount, 1);
     assert.equal(partial.peerScopeKind, 'workstream');
     assert.equal(partial.peerScopeKeyHash.length, 64);
-    assert.equal(audit.filter((item) => item.outcome === 'fail-open').length, 2);
+    assert.equal(audit.filter((item) => item.outcome === 'fail-open').length, 1);
+    assert.equal(audit.filter((item) => item.outcome === 'no-change').length, 1);
   });
 
   test('routes natural review prompts to the merge request ledger scope', async () => {
@@ -337,6 +342,7 @@ describe('provider-neutral lifecycle consumer', () => {
       runtimeRoot: runtime,
       eventRuntimeRoot: eventRuntime,
       contextRuntimeRoot: contextRuntime,
+      globalAuditDirectory: join(runtime, 'query-audit'),
       reviewLedgersRoot,
       supportedEvents: ['UserPromptSubmit'],
       advisoryEvents: ['UserPromptSubmit'],
@@ -405,6 +411,7 @@ describe('provider-neutral lifecycle consumer', () => {
       runtimeRoot: runtime,
       eventRuntimeRoot: eventRuntime,
       contextRuntimeRoot: contextRuntime,
+      globalAuditDirectory: join(runtime, 'query-audit'),
       defaultProjectKey: 'example-project',
       supportedEvents: ['UserPromptSubmit'],
       advisoryEvents: ['UserPromptSubmit'],

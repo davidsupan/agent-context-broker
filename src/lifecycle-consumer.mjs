@@ -23,6 +23,8 @@ import {
 import { realpathSync as resolvePhysicalPath } from 'node:fs';
 
 import { verifyEventTail } from './event-store.mjs';
+import { scopeRelation } from './context-query.mjs';
+import { createContextTrace, persistQueryInjection, traceCounts, traceLayers } from './context-trace.mts';
 import { readPeerProgress } from './peer-progress.mjs';
 import { loadProviderPolicy, policyEntry, scopeReadable } from './provider-policy.mjs';
 import {
@@ -295,7 +297,8 @@ function safeTermsFromHookEvent(event) {
   )].slice(0, 8);
 }
 
-function naturalPeerProgress(event, options) {
+/** @param {any} event @param {any} options @param {import('./context-trace.mts').ContextTrace} trace */
+function naturalPeerProgress(event, options, trace) {
   if (event?.hook_event_name !== 'UserPromptSubmit') return null;
   const scope = safeScopeFromHookEvent(event, options.defaultProjectKey);
   if (!scope) return null;
@@ -312,6 +315,7 @@ function naturalPeerProgress(event, options) {
       scopeKey: scope.key,
       ambientProjectKey: options.defaultProjectKey ?? null,
       providerPolicy: options.providerPolicy ?? null,
+      decisionTrace: trace,
       terms: safeTermsFromHookEvent(event),
       now: options.now,
       maxProgress: 3
@@ -324,6 +328,8 @@ function freshNaturalPeerProgress(natural, state) {
   const delivered = new Set(state.deliveredPeerProgressIds ?? []);
   return {
     ...natural,
+    decisions: natural.decisions.map((/** @type {import('./context-trace.mts').PeerDecision} */ item) => item.decision === 'included' && delivered.has(item.progressId)
+      ? { ...item, decision: 'excluded', reason: 'already-delivered' } : item),
     progress: natural.progress.filter((item) => !delivered.has(item.progressId))
   };
 }
@@ -400,22 +406,34 @@ function appendAudit(options, record) {
   }
 }
 
-function persistInjection(options, eventName, advisory) {
-  const timestamp = options.now.toISOString().replaceAll(':', '').replaceAll('.', '');
-  const name = `${timestamp}-${randomUUID()}.json`;
-  const payload = {
-    schemaVersion: 1,
+/** @param {any} options @param {string} eventName @param {string} advisory
+ * @param {import('./context-trace.mts').ContextTrace} trace @param {any} natural @param {string | null} threadRef */
+function persistInjection(options, eventName, advisory, trace, natural, threadRef) {
+  if (natural) {
+    trace.peerProgress = natural.decisions;
+  }
+  trace.budget.renderedContextBytes = Buffer.byteLength(advisory, 'utf8');
+  trace.layers = traceLayers(trace);
+  const injection = persistQueryInjection(options.globalAuditDirectory, {
     generatedAt: options.now.toISOString(),
     provider: options.provider,
+    profile: null,
+    routeReason: 'lifecycle-advisory',
+    ...(threadRef ? { threadRef } : {}),
     eventName,
     payload: advisory,
-    digest: hash(advisory)
-  };
+    trace
+  });
+  // Keep lifecycle operational audit separate; this sibling is the shared query ledger.
   atomicWrite(
-    join(options.runtimeRoot, 'injections', name),
-    `${JSON.stringify(payload, null, 2)}\n`
+    join(options.globalAuditDirectory, basename(injection.artifact)),
+    `${JSON.stringify({ schemaVersion: 1, auditId: injection.auditId,
+      generatedAt: options.now.toISOString(), provider: options.provider, eventName,
+      profile: null, routeReason: 'lifecycle-advisory',
+      ...(threadRef ? { threadRefHash: hash(threadRef) } : {}),
+      contextDigest: injection.digest, traceCounts: traceCounts(trace) })}\n`
   );
-  return { artifact: `injections/${name}`, digest: payload.digest };
+  return injection;
 }
 
 async function importAdapter(root, moduleName) {
@@ -442,6 +460,7 @@ function normalizeDefinition(definition) {
 export function createLifecycleConsumer(inputDefinition) {
   const definition = normalizeDefinition(inputDefinition);
 
+  /** @param {any} inputOptions */
   function optionsFor(inputOptions = {}) {
     const runtimeRoot = resolve(inputOptions.runtimeRoot ?? definition.runtimeRoot);
     const eventRuntimeRoot = resolve(
@@ -453,6 +472,9 @@ export function createLifecycleConsumer(inputDefinition) {
       provider: definition.provider,
       runtimeRoot,
       eventRuntimeRoot,
+      globalAuditDirectory: resolve(inputOptions.globalAuditDirectory ??
+        (inputOptions.eventRuntimeRoot ? join(eventRuntimeRoot, '..', 'query-audit') : definition.globalAuditDirectory) ??
+        join(eventRuntimeRoot, '..', 'query-audit')),
       adapterRoot: resolve(inputOptions.adapterRoot ?? definition.adapterRoot),
       acceptedSnapshots: inputOptions.acceptedSnapshots ??
         join(resolve(runtimeRoot, '..', 'reconciliation'), 'accepted-snapshots.json'),
@@ -512,7 +534,18 @@ export function createLifecycleConsumer(inputDefinition) {
     const policyRule = policyEntry(options.providerPolicy, definition.provider);
     if (policyRule?.strictIsolation) return { continue: true };
     if (policyRule && policyRule.defaultProject !== undefined) options.defaultProjectKey = policyRule.defaultProject;
-    const snapshotReadable = (scope) => !policyRule?.read || scopeReadable(policyRule, scope);
+    const trace = createContextTrace({ maxSnapshots: 0, maxClaims: 0, maxContextBytes: 0 });
+    trace.lifecycle = { advisoryReferences: 0, claimsInjected: 0 };
+    const snapshotReadable = (scope) => {
+      const readable = !policyRule?.read || scopeReadable(policyRule, scope);
+      if (!readable && scope?.kind && scope?.key) {
+        const relationKey = scopeRelation(scope.kind, scope.key);
+        if (!trace.policy.some(item => item.relationKey === relationKey)) {
+          trace.policy.push({ relationKey, reason: 'scope-denied' });
+        }
+      }
+      return readable;
+    };
     if (!definition.supportedEvents.has(eventName)) {
       appendAudit(options, { ...auditBase, outcome: 'ignored', durationMs: Date.now() - startedAt });
       return { continue: true };
@@ -528,7 +561,7 @@ export function createLifecycleConsumer(inputDefinition) {
       sessionKey = hash(`${definition.provider}-consumer:${event.session_id}`);
       statePath = join(options.runtimeRoot, 'state', `${sessionKey}.json`);
       natural = definition.advisoryEvents.has(eventName)
-        ? naturalPeerProgress(event, options)
+        ? naturalPeerProgress(event, options, trace)
         : null;
       const transcriptPath = validateTranscriptPath(event.transcript_path, options);
 
@@ -603,6 +636,7 @@ export function createLifecycleConsumer(inputDefinition) {
           }
         }
         const threadRef = sourceToken ? sourcePlan.threadRef : null;
+        const auditThreadRef = threadRef ?? state.threadRef ?? null;
 
         if (!definition.advisoryEvents.has(eventName)) {
           appendAudit(options, {
@@ -623,9 +657,16 @@ export function createLifecycleConsumer(inputDefinition) {
         });
         const delivered = new Set(state.deliveredDeltaIds ?? []);
         const freshDeltas = related.deltas.filter((delta) => !delivered.has(delta.deltaId));
+        for (const relationKey of identity.relationKeys) {
+          if (!trace.scopes.some(item => item.relationKey === relationKey)) {
+            trace.scopes.push({ relationKey, role: 'lifecycle' });
+          }
+        }
         const snapshots = acceptedSnapshots(options.acceptedSnapshots, identity.relationKeys, snapshotReadable);
         const priorSnapshots = new Set(state.acceptedSnapshotDigests ?? []);
         const freshSnapshots = snapshots.filter((snapshot) => !priorSnapshots.has(snapshot.digest));
+        trace.lifecycle = { advisoryReferences: freshSnapshots.flatMap((/** @type {any} */ item) => item.canonicalRefs).slice(0, 3).length,
+          claimsInjected: 0 };
         const freshSourceToken = state.sourceToken === sourceToken ? null : sourceToken;
         const lifecycleAdvisory = advisoryFor(
           freshDeltas,
@@ -652,10 +693,12 @@ export function createLifecycleConsumer(inputDefinition) {
             ...(freshNatural?.progress ?? []).map((item) => item.progressId)
           ].slice(-options.stateLimit),
           sourceToken,
+          threadRef: auditThreadRef,
           lastEventName: eventName,
           updatedAt: options.now.toISOString()
         };
-        const injection = advisory ? persistInjection(options, eventName, advisory) : null;
+        const injection = advisory || eventName === 'UserPromptSubmit'
+          ? persistInjection(options, eventName, advisory ?? '', trace, freshNatural, auditThreadRef) : null;
         atomicWrite(statePath, `${JSON.stringify(nextState, null, 2)}\n`);
         appendAudit(options, {
           ...auditBase,
@@ -687,7 +730,6 @@ export function createLifecycleConsumer(inputDefinition) {
             const state = loadState(statePath);
             const freshNatural = freshNaturalPeerProgress(natural, state);
             const advisory = naturalPeerProgressAdvisory(freshNatural);
-            if (!advisory) throw error;
             const nextState = {
               ...state,
               schemaVersion: 1,
@@ -699,12 +741,12 @@ export function createLifecycleConsumer(inputDefinition) {
               lastEventName: eventName,
               updatedAt: options.now.toISOString()
             };
-            const injection = persistInjection(options, eventName, advisory);
+            const injection = persistInjection(options, eventName, advisory ?? '', trace, freshNatural, state.threadRef ?? null);
             atomicWrite(statePath, `${JSON.stringify(nextState, null, 2)}\n`);
             appendAudit(options, {
               ...auditBase,
               sessionKey,
-              outcome: 'context-partial',
+              outcome: advisory ? 'context-partial' : 'no-change',
               errorClass: classified,
               peerProgressCount: freshNatural.progress.length,
               peerProgressDigests: freshNatural.progress.map((item) => item.progressId),
@@ -714,7 +756,8 @@ export function createLifecycleConsumer(inputDefinition) {
               injectionArtifact: injection.artifact,
               durationMs: Date.now() - startedAt
             });
-            return { hookSpecificOutput: { hookEventName: eventName, additionalContext: advisory } };
+            return advisory ? { hookSpecificOutput: { hookEventName: eventName, additionalContext: advisory } }
+              : { continue: true };
           });
         } catch (partialError) {
           error = partialError;
