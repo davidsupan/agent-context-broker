@@ -74,7 +74,7 @@ const requiredFiles = Object.freeze([
   'profiles/context-profiles.json'
 ]);
 
-const textExtensions = new Set(['.css', '.html', '.json', '.jsonl', '.md', '.mjs', '.mts', '.sh', '.txt', '.xml', '.yml', '.yaml']);
+const textExtensions = new Set(['.css', '.html', '.json', '.jsonl', '.md', '.mjs', '.mts', '.ps1', '.cs', '.sh', '.txt', '.xml', '.yml', '.yaml']);
 const decoder = new TextDecoder('utf-8', { fatal: true });
 
 function walk(directory) {
@@ -106,8 +106,9 @@ for (const file of requiredFiles) {
 
 const files = walk(root);
 const powershellFiles = files.filter((path) => extname(path).toLowerCase() === '.ps1');
-if (powershellFiles.length > 0) {
-  throw new Error(`PowerShell files are not allowed in the package: ${powershellFiles.map(slash).join(', ')}`);
+const unexpectedPowerShell = powershellFiles.filter((/** @type {string} */ path) => slash(path) !== 'distillation/src/windows-launcher.ps1');
+if (unexpectedPowerShell.length > 0) {
+  throw new Error(`Unexpected PowerShell files in the package: ${unexpectedPowerShell.map(slash).join(', ')}`);
 }
 
 const textFiles = files.filter((path) => textExtensions.has(extname(path).toLowerCase()));
@@ -242,6 +243,6 @@ process.stdout.write(`${JSON.stringify({
   runtime: `${runtimeInfo().name} ${runtimeInfo().version}`,
   files: files.length,
   textFiles: textFiles.length,
-  powershellFiles: 0,
+  powershellFiles: powershellFiles.length,
   status: 'passed'
 }, null, 2)}\n`);

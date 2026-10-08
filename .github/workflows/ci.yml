@@ -22,6 +22,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
+      - run: npm ci --ignore-scripts --omit=dev
       - run: npm run validate
       - run: npm pack --dry-run
       - run: sh -n scripts/*.sh
@@ -37,6 +38,8 @@ jobs:
         with:
           node-version: 24
       - shell: bash
+        run: npm ci --ignore-scripts --omit=dev
+      - shell: bash
         run: npm run validate
       - shell: bash
         run: npm pack --dry-run
@@ -50,6 +53,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
+      - run: npm ci --ignore-scripts --omit=dev
       - run: npm run validate
       - run: npm pack --dry-run
       - run: sh -n scripts/*.sh
@@ -78,6 +82,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
+      - run: npm ci --ignore-scripts --omit=dev
       - run: npm run build
       - run: node scripts/check-package.mjs --installed
         working-directory: build/package
@@ -95,5 +100,6 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.4.1
+      - run: npm ci --ignore-scripts --omit=dev
       - run: bun run validate:bun
       - run: AGENT_CONTEXT_BROKER_RUNTIME=bun ./scripts/test-shell-installation.sh

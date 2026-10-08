@@ -25,8 +25,11 @@ import { assertSupportedRuntime, inspectInstalledRuntime, runtimeInfo } from './
 
 export const MINIMUM_BUN_VERSION = '1.4.0';
 
+// The distillation module and the one runtime dependency it bundles (zod) are part of the installed tool.
 const PAYLOAD_DIRECTORIES = Object.freeze([
   'adapters',
+  'distillation',
+  'node_modules/zod',
   'docs',
   'examples',
   'fixtures',
@@ -215,7 +218,9 @@ export function payloadManifest(packageRoot) {
   for (const directory of PAYLOAD_DIRECTORIES) {
     const directoryPath = join(root, directory);
     if (pathKind(directoryPath) !== 'directory') {
-      throw new Error(`Payload directory is missing: ${directory}`);
+      throw new Error(directory.startsWith('node_modules/')
+        ? `Payload directory is missing: ${directory}; run npm ci --omit=dev in a source checkout first.`
+        : `Payload directory is missing: ${directory}`);
     }
     for (const file of walkFiles(directoryPath)) {
       paths.push(relative(root, file).split(sep).join('/'));

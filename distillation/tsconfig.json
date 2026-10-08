@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "esnext",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "strict": true,
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "types": ["node"],
+    "noEmit": true,
+    "skipLibCheck": true
+  },
+  "include": ["src/**/*.mts", "scripts/**/*.ts", "test/**/*.mts"],
+  "exclude": [
+    "src/windows-job.mts", "src/windows-file-identity.mts", "src/provider.mts",
+    "src/capability-probe.mts", "src/pilot-budget.mts",
+    "test/windows-job.test.mts", "test/containment.test.mts", "test/windows-file-identity.test.mts", "test/provider.test.mts",
+    "test/capability-probe.test.mts", "test/pilot-budget.test.mts"
+  ]
+}

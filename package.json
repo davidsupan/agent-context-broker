@@ -1,6 +1,6 @@
 {
   "name": "agent-context-broker",
-  "version": "0.12.0-beta.4",
+  "version": "0.12.0-beta.5",
   "description": "A local-first, metadata-only context broker for coding agents.",
   "author": "David Supan",
   "license": "Apache-2.0",
@@ -26,7 +26,14 @@
   },
   "type": "module",
   "files": [
+    "CODE_OF_CONDUCT.md",
+    "CONTRIBUTING.md",
+    "GOVERNANCE.md",
+    "LICENSE.md",
+    "SECURITY.md",
+    "SUPPORT.md",
     "adapters",
+    "distillation",
     "docs",
     "examples",
     "fixtures",
@@ -35,13 +42,7 @@
     "schemas",
     "scripts",
     "src",
-    "test",
-    "CODE_OF_CONDUCT.md",
-    "CONTRIBUTING.md",
-    "GOVERNANCE.md",
-    "LICENSE.md",
-    "SECURITY.md",
-    "SUPPORT.md"
+    "test"
   ],
   "bin": {
     "agent-context": "scripts/agent-context.mjs",
@@ -52,15 +53,22 @@
     "check": "node scripts/check-package.mjs",
     "check:installed": "node scripts/check-package.mjs --installed",
     "test": "node --test --test-timeout=60000 \"test/**/*.test.mjs\" \"providers/codex/test/**/*.test.mjs\" \"providers/claude-code/test/**/*.test.mjs\"",
-    "test:bun": "bun test --timeout 60000 test providers/codex/test providers/claude-code/test",
+    "test:bun": "bun test --timeout 60000 ./test ./providers/codex/test ./providers/claude-code/test",
     "validate": "npm run check && npm run test",
     "validate:bun": "bun scripts/check-package.mjs && npm run test:bun",
     "typecheck": "node scripts/check-types.mjs",
     "build": "node scripts/build-package.mjs",
-    "pack:package": "node scripts/build-package.mjs && npm pack ./build/package"
+    "pack:package": "node scripts/build-package.mjs && npm pack ./build/package",
+    "test:distillation": "node --test --test-timeout=60000 \"distillation/test/*.test.mts\""
   },
   "devDependencies": {
     "@types/node": "24.19.1",
     "typescript": "7.0.2"
-  }
+  },
+  "dependencies": {
+    "zod": "4.6.5"
+  },
+  "bundleDependencies": [
+    "zod"
+  ]
 }
