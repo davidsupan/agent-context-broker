@@ -13,6 +13,8 @@ import { createLifecycleConsumer } from '../src/lifecycle-consumer.mjs';
 import { publishPeerProgress } from '../src/peer-progress.mjs';
 import { attestSource } from '../src/source-attestation.mts';
 import { createContextTrace, traceLayers } from '../src/context-trace.mts';
+import * as codexInventory from '../src/codex-inventory-v2.mts';
+import * as claudeInventory from '../src/claude-inventory.mts';
 
 const packageRoot = resolve(import.meta.dirname, '..');
 const schema = JSON.parse(readFileSync(join(packageRoot, 'schemas/context-trace.schema.json'), 'utf8'));
@@ -253,7 +255,7 @@ test('both lifecycle adapters preserve the exact origin/main advisory with accep
     const fixture = index === 0 ? 'codex-active.jsonl' : 'claude-active.jsonl';
     const transcript = join(h.root, fixture);
     copyFileSync(join(packageRoot, 'fixtures', fixture), transcript);
-    const adapter = await import(index === 0 ? '../src/codex-inventory-v2.mts' : '../src/claude-inventory.mts');
+    const adapter = index === 0 ? codexInventory : claudeInventory;
     const identity = await adapter.readSourceIdentity(transcript);
     const notices = join(h.root, 'accepted-notices.json');
     writeFileSync(notices, JSON.stringify({ schemaVersion: 1, snapshots: [{ snapshotId: 'notice',
