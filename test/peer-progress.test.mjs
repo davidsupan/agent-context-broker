@@ -692,7 +692,7 @@ describe('peer progress', () => {
       runtimeRoot, eventRuntimeRoot, provider: 'codex', strictIsolation: true,
       scopeKind: 'ticket', scopeKey: 'APP-30001', now: '2026-08-26T08:10:00.000Z'
     });
-    assert.deepEqual(isolated, { progress: [], warnings: [] });
+    assert.deepEqual(isolated, { progress: [], warnings: [], decisions: [] });
   });
 
   test('supersedes one actor progress and excludes expired progress', async () => {
@@ -729,7 +729,9 @@ describe('peer progress', () => {
       runtimeRoot, eventRuntimeRoot, provider: 'codex',
       scopeKind: 'ticket', scopeKey: 'APP-49999', now: '2026-09-30T08:30:00.000Z'
     });
-    assert.deepEqual(unrelated, { progress: [], warnings: [] });
+    assert.deepEqual(unrelated.progress, []);
+    assert.deepEqual(unrelated.warnings, []);
+    assert.equal(unrelated.decisions[0].reason, 'relation');
   });
 
   test('replays identical progress idempotently after a fresh module-level read', async () => {

@@ -3,6 +3,151 @@
 Agent Context Broker shares bounded, source-linked context without treating raw
 agent conversations as a cross-provider data plane.
 
+## Decision trace
+
+`context-query --trace` adds `result.trace`; callers can also pass `trace: true`
+to `planContextQuery` or `runContextQuery`. Omitting the option keeps the query
+response shape unchanged. Selection, relevance, rendered context and injection
+digest do not depend on the trace option. The contract is
+`schemas/context-trace.schema.json` (draft 2020-12, `schemaVersion: 1`).
+
+The trace records accepted `scopes` as relation hashes and roles; related clean
+`snapshots` in their original rank order; and `candidates` with claim identity,
+type, subject, predicate, snapshot identity, score and decision. Claim values
+never appear in the trace. Neither do value hashes, provenance, query terms or
+peer summaries. A score is `null` when relevance was not computed. A term miss
+keeps the relevance result `-1` in `candidates`; in `nearMisses` its score is what
+it would have received without the term gate. At most five near misses are
+returned, highest score first, limited to `claim-cap` and `term-miss`.
+
+| Reason | Meaning |
+| --- | --- |
+| `stale`, `expired` | Freshness excluded the claim. The current evaluator produces `expired` for elapsed expiry times; `stale` is reserved for a future stale evaluator. |
+| `claim-type` | The profile does not admit this claim type. |
+| `provider` | The profile disallows cross-provider claims; for peer progress this also covers provider read-policy rejection. |
+| `private-other-provider` | A claim from another provider is not shared. |
+| `relation` | No accepted relation; the claim guard is normally unreachable because snapshot verification already enforces it. Peer progress can be unrelated. |
+| `term-miss` | No query term matched and no narrow-scope or ambient exception applied. |
+| `claim-cap` | A relevant claim ranked below `maxClaims`. |
+| `tombstoned` | The current-claim/tombstone filter removed a snapshot claim ID, including historical IDs no longer current. Metadata is nullable if its verified claim file is gone or unreadable. |
+| `read-limit` | The per-snapshot read cap omitted claims. One row carries `snapshotId`, `count`, null `score`, and the excluded decision; no claim identity is invented. |
+| `snapshot-cap` | A snapshot ranked below `maxSnapshots`. |
+| `unreadable` | The snapshot file could not be read; its scope kind is null. If it falls within the read cap, verification still throws, preserving fail-closed behavior. |
+| `stale-relation` | Rechecking recorded peer relations removed the link that made the item relevant. |
+| `cap` | Peer progress ranked below its separate item cap. |
+| `already-delivered` | The lifecycle consumer already supplied this peer item to the session. |
+| `query-denied` | Provider policy denied the primary scope or required isolation. |
+| `ambient-project-denied`, `ambient-global-denied` | Provider policy removed the named ambient relation hash. |
+| `scope-denied` | Lifecycle policy withheld accepted-context references for the named scope. |
+
+`peerProgress` carries only progress IDs, scores and decisions. `policy` records
+scope denials. `budget` records `maxSnapshots`, `maxClaims`, `maxContextBytes`
+and the actual UTF-8 `renderedContextBytes`. Included means selected before the
+existing byte-bounded rendering step: a trailing selected claim can be absent
+from the rendered payload. Read the payload to see the exact delivered text.
+Freshness takes precedence over other claim exclusions. Peer decisions follow
+the existing relation/provider, policy, expiry, then cap gates. Removing one
+stale peer link need not exclude the item if another current relation qualifies.
+
+Every trace includes `layers`, an ordered summary for a diagram. Each layer has
+`id`, `state` (`used`, `empty`, `off`, `denied`, or `error`), `included`, `excluded`,
+`reasons` (exclusion counts by reason), and `detail` (a trace section pointer or
+null). A layer with decisions is `used`, including when all were excluded;
+an enabled layer with no decisions is `empty`. Counts summarize candidates, not
+snapshot rows; read-limit candidates contribute their omitted claim count.
+
+| Order / ID | Counts and detail |
+| --- | --- |
+| 1. `accepted-primary` | Candidates from requested-scope snapshots; `candidates`. |
+| 2. `accepted-ambient-project` | Candidates from ambient project snapshots; `candidates`. |
+| 3. `accepted-ambient-global` | Candidates from ambient global snapshots; `candidates`. |
+| 4. `accepted-related` | Candidates from all other snapshot roles; `candidates`. |
+| 5. `suggested-scopes` | Unconfirmed prompt keys; `suggestedScopes`. Included is zero; excluded and `no-local-evidence` count suggestions. `used` when non-empty, otherwise `empty`. |
+| 6. `peer-progress` | Peer decisions, including `already-delivered`; `peerProgress`. |
+| 7. `notices` | `off`, zero counts and null detail until the result has `teamNoticeLane`. Then map its state and `counts.included`, sum exclusions `read`, `quarantined`, `hiddenByAudience`, `omittedByBudget`, `unverified`, and point to `notices`. |
+| 8. `artifact-evidence` | `off`, zero counts and null detail; populated by an external wrapper. |
+| 9. `policy` | `denied` on `query-denied`, `used` on dropped scopes, otherwise `empty`; exclusions count policy rows by reason; `policy`. |
+| 10. `budget` | Always `used`; included is rendered UTF-8 bytes, excluded is zero, `limit` is `maxContextBytes`; `budget`. |
+
+The notice adapter only summarizes a supplied lane; this branch does not read
+notices or add that lane. Snapshot caps and unreadable snapshots remain in
+`snapshots`, without inventing claim counts for unread files.
+
+Executed queries always persist the trace, even without `--trace`, in:
+
+```text
+<global-audit-directory>/
+  <timestamp>-<audit-id>.json             metadata-only query ledger record
+  injections/<timestamp>-<audit-id>.json  exact rendered payload and trace
+```
+
+The injection artifact also has `schemaVersion`, `auditId`, `generatedAt`,
+`profile`, `routeReason`, `provider`, `digest`, and `threadRef` when known.
+Query payloads contain rendered accepted values; lifecycle payloads contain only
+peer progress and advisory references/hints. Neither trace contains values.
+The ledger adds only `traceCounts: { included, excludedByReason, nearMisses }`,
+counting claim and peer decisions, with read-limit rows weighted by their count.
+It does not duplicate candidate metadata. Snapshot and policy decisions remain
+in the artifact. Existing ticket, review and thread ledgers remain metadata-only.
+
+The command's `--global-audit-dir` selects this directory. The installed launcher
+and both provider bridges default to `<runtime-home>/runtime/query-audit`.
+Bridges accept `AGENT_CONTEXT_BROKER_GLOBAL_AUDIT_DIR`; embedded lifecycle callers
+can pass `globalAuditDirectory`. Operational hook logs remain under
+`<lifecycle-runtime>/audit`; new injection artifacts use the shared directory,
+not the old `<lifecycle-runtime>/injections` location. Old files are not moved.
+
+Lifecycle hooks retain their existing advisory text: fresh peer progress and
+lifecycle references/hints. They do not run accepted-claim queries; agents fetch
+accepted claims through the query command. Shared artifacts persist that exact
+payload, including an empty payload when a handled prompt delivers nothing.
+Lifecycle traces have no claim candidates, snapshots or near misses, and layers
+1–4 are `off`. They record peer decisions (including session deduplication), the
+scope relations actually used, policy decisions, and the final advisory bytes.
+`lifecycle: { advisoryReferences, claimsInjected: 0 }` counts accepted-context
+references actually listed in the advisory, after its three-reference cap.
+Source tokens, thread references and generic query instructions are not counted.
+Metadata relation hashes have role `lifecycle`; peer relations retain their roles.
+Lifecycle `maxSnapshots` and `maxClaims` are zero. `maxContextBytes` and the budget
+layer's `limit` are zero to indicate no aggregate byte limit: existing caps of
+three peer items, compacted peer text and three accepted references still apply.
+No new truncation or selection is introduced by tracing.
+
+Lifecycle routing treats ticket and MR keys extracted from prompts as suggestions
+until local evidence establishes a route. A ticket qualifies when the session's
+git branch names it, its configured ticket package has valid `jira-context.json`
+metadata, this session previously routed to it with evidence, or a verified
+accepted claim or peer-progress record has that exact ticket scope and provenance
+from the current provider. Related scopes and another provider's records do not
+qualify. Accepted evidence uses the registry's verified snapshots and claims;
+peer evidence uses verified events and artifacts, including earlier expired or
+replaced work. These evidence reads are lazy and reused within each prompt.
+An MR qualifies through the existing configured review-ledger reader or an
+earlier evidenced route in the same session. No network lookup runs.
+
+Exactly one evidenced key wins even when the prompt contains other sample keys.
+Otherwise several keys retain the branch-only fallback. A lone unconfirmed key
+falls back to the branch ticket, then the configured default project, then no
+scope. A ticket-looking directory name alone is not evidence. Existing workstream
+routing applies when no ticket or MR keys are present. Explicit caller scopes
+(`--scope-kind`/`--scope-key`, `--issue-key`, `--review-key`) bypass this gate.
+
+The existing session state gains a bounded `routedScopes` list of relation hashes;
+old state without that list has no routing history. Only evidenced ticket/MR
+routes enter it, even when there is no peer advisory to deliver. Unconfirmed keys
+appear only as `suggestedScopes: [{ kind, keyHash, reason: 'no-local-evidence' }]`,
+where `keyHash` is SHA-256 of the lowercase key. Query traces have an empty list.
+Suggestions add no advisory text. They are persisted even when the transcript is
+unavailable and no fallback scope exists; the injection payload is then empty.
+
+To list a session's injections, scan `injections/*.json`, select the exact
+`threadRef`, and sort by `generatedAt` (then filename for equal timestamps).
+The reference comes from source attestation and is retained in lifecycle state
+across prompts without new transcript records. Before a transcript is available,
+a partial advisory may have no known thread reference; none is fabricated.
+Strict isolation still returns before reads or writes, and failed verification
+does not create a successful injection artifact.
+
 ## Components
 
 - `providers/` contains thin Codex and Claude Code adapters. They translate

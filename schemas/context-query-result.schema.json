@@ -10,6 +10,7 @@
     "context", "injection", "audit"
   ],
   "properties": {
+    "trace": { "$ref": "context-trace.schema.json" },
     "schemaVersion": { "const": 1 },
     "mode": { "const": "context-query" },
     "provider": { "enum": ["codex", "claude-code"] },

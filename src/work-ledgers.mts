@@ -97,17 +97,23 @@ export function parseMergeRequestKey(value: unknown): MergeRequestKey | null {
   return { key: match[0], project: match.groups!.project, iid: match.groups!.iid };
 }
 
-export function ticketPackageRelations(ticketPackagesRoot: string | null | undefined, issueKey: string): WorkRelation[] {
-  if (!ticketPackagesRoot || !EXACT_ISSUE_KEY.test(issueKey ?? '')) return [];
+export function ticketPackageContext(ticketPackagesRoot: string | null | undefined, issueKey: string): TicketContext | null {
+  if (!ticketPackagesRoot || !EXACT_ISSUE_KEY.test(issueKey ?? '')) return null;
   const packageRoot = join(resolve(ticketPackagesRoot), issueKey);
   const contextPath = join(packageRoot, 'jira-context.json');
-  if (!existsSync(contextPath)) return [];
+  if (!existsSync(contextPath)) return null;
   const parsedContext: unknown = JSON.parse(readFileSync(contextPath, 'utf8'));
   const context = parsedContext !== null && typeof parsedContext === 'object'
     ? parsedContext as TicketContext : null;
   if (context?.issue?.key !== issueKey || !isRecord(context.relatedTickets)) {
     throw new Error(`Ticket relation context is invalid for ${issueKey}.`);
   }
+  return context;
+}
+
+export function ticketPackageRelations(ticketPackagesRoot: string | null | undefined, issueKey: string): WorkRelation[] {
+  const context = ticketPackageContext(ticketPackagesRoot, issueKey);
+  if (!context?.relatedTickets) return [];
   const relations: WorkRelation[] = [];
   if (EXACT_ISSUE_KEY.test(context.relatedTickets.parent?.key ?? '')) {
     relations.push({ kind: 'ticket', key: context.relatedTickets.parent!.key!, relationship: 'jira-parent' });

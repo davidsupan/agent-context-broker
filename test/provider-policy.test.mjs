@@ -186,7 +186,7 @@ describe('provider policy enforcement', () => {
     assert.equal(read(undefined).progress.length, 1);
     assert.equal(read(policy({ 'claude-code': { read: { allow: ['workstream:other'] } } })).progress.length, 1);
     const restricted = read(policy({ codex: { read: { allow: ['workstream:research-*'] } } }));
-    assert.deepEqual(restricted, { progress: [], warnings: ['provider-policy-denied'] });
+    assert.deepEqual(restricted, { progress: [], warnings: ['provider-policy-denied'], decisions: [] });
     assert.deepEqual(read(policy({ codex: { strictIsolation: true } })).progress, []);
   });
 
@@ -220,6 +220,7 @@ describe('provider policy enforcement', () => {
       runtimeRoot: runtime,
       eventRuntimeRoot: eventRuntime,
       contextRuntimeRoot: contextRuntime,
+      globalAuditDirectory: join(runtime, 'query-audit'),
       providerPolicyPath: policyPath,
       supportedEvents: ['UserPromptSubmit'],
       advisoryEvents: ['UserPromptSubmit'],

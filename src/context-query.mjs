@@ -16,6 +16,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:pat
 import { setTimeout as delay } from 'node:timers/promises';
 
 import { normalizeAgentDescriptor } from './agent-identity.mts';
+import { claimDecision, createContextTrace, persistQueryInjection, traceCounts, traceLayers } from './context-trace.mts';
 import { loadContextProfiles, routeContextProfile } from './context-router.mts';
 import { readPeerProgress } from './peer-progress.mjs';
 import { policyEntry, scopeReadable } from './provider-policy.mjs';
@@ -265,8 +266,9 @@ export function verifiedClaim(root, expectedClaimId, maxValueBytes, now) {
  * One accepted snapshot file, hash-verified against its registry entry; no scope check, no claims read.
  * @param {string} root
  * @param {any} registryEntry an entry of accepted-snapshots.json, validated here
+ * @param {((claimId: string) => void) | null} onFiltered
  */
-export function verifiedSnapshotFile(root, registryEntry) {
+export function verifiedSnapshotFile(root, registryEntry, onFiltered = null) {
   const statePath = join(root, 'state.json');
   if (!existsSync(statePath)) throw new Error('Reconciliation state is missing.');
   const state = loadState(statePath);
@@ -296,10 +298,36 @@ export function verifiedSnapshotFile(root, registryEntry) {
   const allowed = new Set(Object.entries(current)
     .filter(([claimKey]) => !state.tombstones?.[key]?.[hash(claimKey)])
     .map(([, item]) => item.claimId));
-  return { ...snapshot, claimIds: snapshot.claimIds.filter((/** @type {string} */ claimId) => allowed.has(claimId)) };
+  return { ...snapshot, claimIds: snapshot.claimIds.filter((/** @type {string} */ claimId) => {
+    if (allowed.has(claimId)) return true;
+    onFiltered?.(claimId);
+    return false;
+  }) };
 }
 
 const SNAPSHOT_ROLE_RANK = { primary: 0, 'ambient-project': 1, 'ambient-global': 2 };
+
+/** Local routing evidence only; never render or query accepted values.
+ * @param {string} registryPath @param {string} provider @param {Date} now
+ * @returns {Set<string>}
+ */
+export function acceptedTicketKeysForProvider(registryPath, provider, now) {
+  const keys = new Set();
+  const registry = readJson(registryPath);
+  if (registry?.schemaVersion !== 1 || !Array.isArray(registry.snapshots)) return keys;
+  const root = dirname(registryPath);
+  for (const entry of registry.snapshots) {
+    try {
+      const snapshot = verifiedSnapshotFile(root, entry);
+      if (snapshot.scope.kind !== 'ticket') continue;
+      if (snapshot.claimIds.some((/** @type {string} */ id) =>
+        verifiedClaim(root, id, 0, now).providers.includes(provider))) keys.add(snapshot.scope.key);
+    } catch {
+      // Unverifiable records cannot establish ownership of a prompt-derived key.
+    }
+  }
+  return keys;
+}
 
 /**
  * Where a related snapshot ranks before the snapshot cap: by its own scope's role in the query (the requested scope,
@@ -316,7 +344,8 @@ function snapshotRank(root, entry, scopeRelations) {
   const own = scope && typeof scope.kind === 'string' && typeof scope.key === 'string'
     ? scopeRelations.get(scopeRelation(scope.kind, scope.key)) : undefined;
   const role = own === undefined ? 4 : (SNAPSHOT_ROLE_RANK[/** @type {keyof typeof SNAPSHOT_ROLE_RANK} */ (own)] ?? 3);
-  return { role, createdAt: typeof snapshot?.createdAt === 'string' ? snapshot.createdAt : '' };
+  return { role, scopeRole: own ?? 'related', scopeKind: scope?.kind ?? null,
+    unreadable: snapshot === null, createdAt: typeof snapshot?.createdAt === 'string' ? snapshot.createdAt : '' };
 }
 
 /**
@@ -324,8 +353,9 @@ function snapshotRank(root, entry, scopeRelations) {
  * unless the caller turns that off or a provider's read rules do not allow the scope. Their keys are read from the
  * snapshot files; verification still happens on the selected ones.
  * @param {string} root @param {any[]} snapshots @param {any} rule
+ * @param {import('./context-trace.mts').ContextTrace | null} trace
  */
-function ambientGlobalRelations(root, snapshots, rule) {
+function ambientGlobalRelations(root, snapshots, rule, trace) {
   /** @type {string[]} */
   const relations = [];
   for (const entry of snapshots) {
@@ -333,14 +363,26 @@ function ambientGlobalRelations(root, snapshots, rule) {
     let scope = null;
     try { scope = readJson(join(root, 'snapshots', `${entry.snapshotId}.json`))?.scope ?? null; } catch { continue; }
     if (scope?.kind !== 'global' || typeof scope.key !== 'string') continue;
-    if (rule?.read && !scopeReadable(rule, { kind: 'global', key: scope.key })) continue;
+    if (rule?.read && !scopeReadable(rule, { kind: 'global', key: scope.key })) {
+      const relationKey = scopeRelation('global', scope.key);
+      if (!trace?.policy.some((item) => item.relationKey === relationKey)) {
+        trace?.policy.push({ relationKey, reason: 'ambient-global-denied' });
+      }
+      continue;
+    }
     relations.push(scopeRelation('global', scope.key));
   }
   return relations;
 }
 
-function verifiedSnapshot(root, registryEntry, profile, options, now) {
-  const snapshot = verifiedSnapshotFile(root, registryEntry);
+/** @param {any} root @param {any} registryEntry @param {any} profile @param {any} options
+ * @param {any} now @param {import('./context-trace.mts').ContextTrace | null} trace */
+function verifiedSnapshot(root, registryEntry, profile, options, now, trace) {
+  const snapshot = verifiedSnapshotFile(root, registryEntry, trace ? (claimId) => {
+    // A withdrawn claim is named by its id only: its key and wording left the memory with the withdrawal, and
+    // reading a file still awaiting deletion would copy them into the audit.
+    trace.candidates.push(claimDecision({ claimId }, registryEntry.snapshotId, null, 'tombstoned'));
+  } : null);
   // Fail-closed: the snapshot must still carry a relation the query accepts. The accepted
   // set is the primary scope plus relations derived from trusted ledger files, so this
   // broadens what is in scope without weakening the gate itself.
@@ -374,14 +416,21 @@ function claimHaystack(claim, snapshot) {
 }
 
 function relevance(claim, snapshot, profile, queryTerms, options) {
-  if (!profile.claimTypes.includes(claim.claimType)) return -1;
-  if (!profile.crossProvider && !claim.providers.includes(options.provider)) return -1;
-  if (!claim.providers.includes(options.provider) && claim.sensitivity !== 'shared') return -1;
+  const result = relevanceDecision(claim, snapshot, profile, queryTerms, options);
+  return result.reason ? -1 : result.score;
+}
+
+/** @param {any} claim @param {any} snapshot @param {any} profile @param {any} queryTerms @param {any} options
+ * @returns {{ score: number | null, reason: import('./context-trace.mts').ClaimReason | null }} */
+function relevanceDecision(claim, snapshot, profile, queryTerms, options) {
+  if (!profile.claimTypes.includes(claim.claimType)) return { score: null, reason: 'claim-type' };
+  if (!profile.crossProvider && !claim.providers.includes(options.provider)) return { score: null, reason: 'provider' };
+  if (!claim.providers.includes(options.provider) && claim.sensitivity !== 'shared') return { score: null, reason: 'private-other-provider' };
   const scopeRelations = options.scopeRelations ?? null;
   if (scopeRelations) {
-    if (!snapshot.relationKeys.some((relationKey) => scopeRelations.has(relationKey))) return -1;
+    if (!snapshot.relationKeys.some((relationKey) => scopeRelations.has(relationKey))) return { score: null, reason: 'relation' };
   } else if (options.scopeKind && options.scopeKey) {
-    if (!snapshot.relationKeys.includes(scopeRelation(options.scopeKind, options.scopeKey))) return -1;
+    if (!snapshot.relationKeys.includes(scopeRelation(options.scopeKind, options.scopeKey))) return { score: null, reason: 'relation' };
   }
 
   const haystack = claimHaystack(claim, snapshot);
@@ -400,9 +449,12 @@ function relevance(claim, snapshot, profile, queryTerms, options) {
   // Global rules are ambient: they apply whatever the task is about, so they skip the term filter and rank below
   // every claim that matched a term.
   const ambientGlobal = snapshot.scope?.kind === 'global' && options.scopeKind !== 'global';
-  if (queryTerms.length > 0 && queryMatches === 0 && !(narrowScope && exactScope >= 4) && !ambientGlobal) return -1;
-  return (queryMatches * 8) + (profileMatches * 2) + exactScope +
+  const score = (queryMatches * 8) + (profileMatches * 2) + exactScope +
     (claim.providers.includes(options.provider) ? 0 : 1);
+  if (queryTerms.length > 0 && queryMatches === 0 && !(narrowScope && exactScope >= 4) && !ambientGlobal) {
+    return { score, reason: 'term-miss' };
+  }
+  return { score, reason: null };
 }
 
 function publicClaim(claim, snapshot, score) {
@@ -443,7 +495,7 @@ function boundedContext(lines, maxBytes) {
   return accepted.join('\n');
 }
 
-function renderContext(result, maxBytes) {
+export function renderContext(result, maxBytes, includePeerProgress = true) {
   if (result.strictIsolation) {
     return 'Agent Context Broker strict isolation is active. No cross-task or peer-provider context was read or injected.';
   }
@@ -463,7 +515,7 @@ function renderContext(result, maxBytes) {
     lines.push(`- ${claim.claimKey}${label}: ${value} [${claim.providers.join('+')}] (${claim.canonicalRefs.join(', ')})`);
   }
   if (result.claims.length === 0) lines.push('No matching accepted claims were found.');
-  if (result.peerProgress.length > 0) {
+  if (includePeerProgress && result.peerProgress.length > 0) {
     lines.push('Live peer progress (unverified; verify canonical sources before acting):');
     for (const progress of result.peerProgress) {
       const conflict = progress.conflicted ? ' CONFLICTED' : '';
@@ -483,7 +535,7 @@ function renderContext(result, maxBytes) {
       }
       lines.push(`  freshness: observed ${progress.observedAt}, expires ${progress.expiresAt}`);
     }
-  } else {
+  } else if (includePeerProgress) {
     lines.push('No matching live peer progress was found.');
   }
   lines.push('No raw peer conversation, prompt, response, transcript, tool argument, tool result, or native session identifier was imported.');
@@ -518,7 +570,8 @@ function queryAudit(result, options, auditId) {
     peerProgressDigests: result.peerProgress.map((progress) => progress.progressId).sort(),
     snapshotHashes: [...new Set(result.claims.map((claim) => claim.snapshot.snapshotHash))].sort(),
     warningCodes: result.warnings,
-    contextDigest: hash(result.context)
+    contextDigest: hash(result.context),
+    ...(result.trace ? { traceCounts: traceCounts(result.trace) } : {})
   };
 }
 
@@ -569,6 +622,7 @@ function threadLedgerPath(threadAuditRoot, threadRef) {
   return join(directory, 'CONTEXT_LEDGER.jsonl');
 }
 
+/** @param {any} inputOptions */
 async function buildContextQuery(inputOptions = {}) {
   const options = { ...DEFAULTS, ...inputOptions };
   if (!PROVIDERS.has(options.provider)) throw new Error(`Unsupported provider: ${options.provider}.`);
@@ -583,6 +637,7 @@ async function buildContextQuery(inputOptions = {}) {
   const now = options.now ? new Date(options.now) : new Date();
   if (Number.isNaN(now.getTime())) throw new Error('Context query time is invalid.');
   const terms = normalizedTerms(options.terms, options);
+  const trace = options.trace ? createContextTrace(route.profile) : null;
   const base = {
     schemaVersion: 1,
     mode: 'context-query',
@@ -595,6 +650,7 @@ async function buildContextQuery(inputOptions = {}) {
     peerProgress: [],
     warnings: [],
     context: '',
+    ...(trace ? { trace } : {}),
     injection: { payload: '', digest: null, persisted: false, artifact: null },
     audit: {
       persisted: false,
@@ -606,24 +662,32 @@ async function buildContextQuery(inputOptions = {}) {
     }
   };
 
+  function finish() {
+    base.context = renderContext(base, route.profile?.maxContextBytes ?? 1024);
+    base.injection = { payload: base.context, digest: hash(base.context), persisted: false, artifact: null };
+    if (trace) {
+      trace.budget.renderedContextBytes = Buffer.byteLength(base.context, 'utf8');
+      trace.layers = traceLayers(trace, base);
+    }
+    return base;
+  }
+
   const rule = policyEntry(options.providerPolicy, options.provider);
   if (rule && route.shouldQuery && (rule.strictIsolation ||
       !scopeReadable(rule, { kind: options.scopeKind, key: options.scopeKey }))) {
     base.warnings.push('provider-policy-denied');
-    base.context = renderContext(base, route.profile?.maxContextBytes ?? 1024);
-    base.injection = { payload: base.context, digest: hash(base.context), persisted: false, artifact: null };
-    return base;
+    trace?.policy.push({ relationKey: scopeRelation(options.scopeKind, options.scopeKey), reason: 'query-denied' });
+    return finish();
   }
   if (rule?.read) {
     options.scopeExpansion = false;
     if (options.ambientProjectKey && !scopeReadable(rule, { kind: 'project', key: options.ambientProjectKey })) {
+      trace?.policy.push({ relationKey: scopeRelation('project', options.ambientProjectKey), reason: 'ambient-project-denied' });
       options.ambientProjectKey = null;
     }
   }
   if (!route.shouldQuery) {
-    base.context = renderContext(base, route.profile?.maxContextBytes ?? 1024);
-    base.injection = { payload: base.context, digest: hash(base.context), persisted: false, artifact: null };
-    return base;
+    return finish();
   }
   if (!options.runtimeRoot) throw new Error('Context query requires runtimeRoot.');
   validateScope(options);
@@ -645,14 +709,15 @@ async function buildContextQuery(inputOptions = {}) {
       maxProgress: Math.min(route.profile.maxClaims, 8)
     });
     base.peerProgress = progress.progress;
+    if (trace) trace.peerProgress = progress.decisions;
     base.warnings.push(...progress.warnings);
   }
+  const scopeRelations = acceptedScopeRelations(options);
+  if (trace) trace.scopes = [...scopeRelations].map(([relationKey, role]) => ({ relationKey, role }));
   const registry = readJson(join(root, 'accepted-snapshots.json'));
   if (!registry) {
     base.warnings.push('accepted-registry-missing');
-    base.context = renderContext(base, route.profile.maxContextBytes);
-    base.injection = { payload: base.context, digest: hash(base.context), persisted: false, artifact: null };
-    return base;
+    return finish();
   }
   if (registry.schemaVersion !== 1 || !Array.isArray(registry.snapshots)) {
     throw new Error('Accepted snapshot registry is invalid.');
@@ -660,13 +725,13 @@ async function buildContextQuery(inputOptions = {}) {
   if (!existsSync(join(root, 'state.json'))) throw new Error('Reconciliation state is missing.');
   loadState(join(root, 'state.json'));
 
-  const scopeRelations = acceptedScopeRelations(options);
   const { ambientGlobal, scopeKind } = /** @type {any} */ (options);
   if (ambientGlobal !== false && scopeKind !== 'global') {
-    for (const relationKey of ambientGlobalRelations(root, registry.snapshots, rule)) {
+    for (const relationKey of ambientGlobalRelations(root, registry.snapshots, rule, trace)) {
       if (!scopeRelations.has(relationKey)) scopeRelations.set(relationKey, 'ambient-global');
     }
   }
+  if (trace) trace.scopes = [...scopeRelations].map(([relationKey, role]) => ({ relationKey, role }));
   const scopedOptions = { ...options, scopeRelations };
   if (scopeRelations.size > 1) base.warnings.push('scope-relations-expanded');
   const entries = registry.snapshots
@@ -678,13 +743,20 @@ async function buildContextQuery(inputOptions = {}) {
       left.rank.role - right.rank.role ||
       right.rank.createdAt.localeCompare(left.rank.createdAt) ||
       Number(right.entry.version ?? 0) - Number(left.entry.version ?? 0))
-    .map((/** @type {{ entry: any }} */ { entry }) => entry);
+    .map((/** @type {{entry: any, rank: ReturnType<typeof snapshotRank>}} */ { entry, rank }, /** @type {number} */ index) => {
+      trace?.snapshots.push({ snapshotId: entry.snapshotId, scopeKind: rank.scopeKind,
+        role: rank.scopeRole, rank: index, selected: index < route.profile.maxSnapshots && !rank.unreadable,
+        ...(rank.unreadable ? { reason: 'unreadable' } : index >= route.profile.maxSnapshots ? { reason: 'snapshot-cap' } : {}) });
+      return entry;
+    });
   const selectedEntries = entries.slice(0, route.profile.maxSnapshots);
   if (entries.length > selectedEntries.length) base.warnings.push('accepted-snapshot-limit-reached');
   let claimReadLimitReached = false;
   const candidates = selectedEntries.flatMap((entry) => {
-    const snapshot = verifiedSnapshot(root, entry, route.profile, scopedOptions, now);
+    const snapshot = verifiedSnapshot(root, entry, route.profile, scopedOptions, now, trace);
     claimReadLimitReached ||= snapshot.omittedClaimReadCount > 0;
+    if (snapshot.omittedClaimReadCount > 0) trace?.candidates.push({ snapshotId: snapshot.snapshotId,
+      decision: 'excluded', reason: 'read-limit', score: null, count: snapshot.omittedClaimReadCount });
     return snapshot.claims.map((claim) => ({
       claim,
       snapshot,
@@ -707,12 +779,26 @@ async function buildContextQuery(inputOptions = {}) {
   if (currentCandidates.length > route.profile.maxClaims) base.warnings.push('accepted-claim-limit-reached');
   base.claims = currentCandidates.slice(0, route.profile.maxClaims)
     .map((item) => publicClaim(item.claim, item.snapshot, item.score));
+  if (trace) {
+    const included = new Set(currentCandidates.slice(0, route.profile.maxClaims));
+    for (const item of candidates) {
+      const detail = relevanceDecision(item.claim, item.snapshot, route.profile, terms, scopedOptions);
+      const reason = ['stale', 'expired'].includes(item.claim.freshnessStatus)
+        ? item.claim.freshnessStatus : detail.reason ?? (included.has(item) ? undefined : 'claim-cap');
+      const candidate = claimDecision(item.claim, item.snapshot.snapshotId,
+        detail.reason === 'term-miss' ? -1 : detail.score, reason);
+      trace.candidates.push(candidate);
+      if (reason === 'claim-cap' || reason === 'term-miss') {
+        trace.nearMisses.push({ ...candidate, score: detail.score });
+      }
+    }
+    trace.nearMisses.sort((left, right) => (right.score ?? -1) - (left.score ?? -1));
+    trace.nearMisses = trace.nearMisses.slice(0, 5);
+  }
   if (base.claims.some((claim) => claim.valueOmitted)) {
     base.warnings.push('accepted-claim-value-omitted');
   }
-  base.context = renderContext(base, route.profile.maxContextBytes);
-  base.injection = { payload: base.context, digest: hash(base.context), persisted: false, artifact: null };
-  return base;
+  return finish();
 }
 
 export async function planContextQuery(options) {
@@ -724,26 +810,29 @@ export async function runContextQuery(inputOptions) {
   if (options.execute !== true || !options.globalAuditDirectory) {
     throw new Error('Audited context query requires execute: true and globalAuditDirectory.');
   }
-  const result = await buildContextQuery(options);
+  const result = await buildContextQuery({ ...options, trace: true });
+  const output = { ...result };
+  if (!options.trace) delete output.trace;
   if (result.strictIsolation) {
-    return result;
+    return output;
+  }
+  if (options.threadRef && !THREAD_REF.test(options.threadRef)) {
+    throw new Error('Thread audit reference is invalid.');
   }
   const auditId = randomUUID();
   const audit = queryAudit(result, options, auditId);
   const timestamp = result.generatedAt.replaceAll(':', '').replaceAll('.', '');
   const globalPath = join(resolve(options.globalAuditDirectory), `${timestamp}-${auditId}.json`);
   atomicWrite(globalPath, `${JSON.stringify(audit, null, 2)}\n`);
-  const injectionName = `${timestamp}-${auditId}.json`;
-  const injectionPath = join(resolve(options.globalAuditDirectory), 'injections', injectionName);
-  atomicWrite(injectionPath, `${JSON.stringify({
-    schemaVersion: 1,
-    auditId,
+  const injection = persistQueryInjection(options.globalAuditDirectory, {
     generatedAt: result.generatedAt,
     provider: result.provider,
     profile: result.profile,
+    routeReason: result.routeReason,
+    ...(options.threadRef ? { threadRef: options.threadRef } : {}),
     payload: result.context,
-    digest: hash(result.context)
-  }, null, 2)}\n`);
+    trace: /** @type {import('./context-trace.mts').ContextTrace} */ (result.trace)
+  }, auditId);
 
   const ledgerPath = ticketLedgerPath(options.ticketPackageRoot, options.ticketPackagesRoot, options.ticketAuditRoot);
   if (ledgerPath) {
@@ -774,12 +863,12 @@ export async function runContextQuery(inputOptions) {
   }
 
   return {
-    ...result,
+    ...output,
     injection: {
       payload: result.context,
       digest: hash(result.context),
       persisted: true,
-      artifact: `injections/${injectionName}`
+      artifact: injection.artifact
     },
     audit: {
       persisted: true,
