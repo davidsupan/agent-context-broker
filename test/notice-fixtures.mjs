@@ -1,7 +1,8 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { createHash } from 'node:crypto';
+import { Worker } from 'node:worker_threads';
 
 export function notice(overrides = {}) {
   return {
@@ -32,12 +33,27 @@ export function writeJson(path, value) {
   writeFileSync(path, `${JSON.stringify(value)}\n`);
 }
 
-export function fixture(records = [notice()]) {
+export function fixture(records = [notice()], base, mutable = false) {
   const temporary = join(import.meta.dirname, '..', 'tmp');
   mkdirSync(temporary, { recursive: true });
   const root = mkdtempSync(join(temporary, 'acb-notices-'));
   const home = join(root, 'home');
-  const checkout = join(root, 'checkout');
+  const custom = JSON.stringify(records) !== JSON.stringify([notice()]);
+  const checkout = base && !custom && !mutable ? base.checkout : join(root, 'checkout');
+  if (base) {
+    cpSync(base.home, home, { recursive: true });
+    if (checkout !== base.checkout) cpSync(base.checkout, checkout, { recursive: true });
+    writeJson(join(home, 'team-shared.json'), { schemaVersion: 1, sharedContextRoot: checkout, repository: base.repository,
+      remote: 'origin', protectedBranch: 'main', readerRoles: ['dev'] });
+    const f = { root, home, checkout, repository: base.repository, commit: base.commit,
+      options: { runtimeHome: home, env: {}, now: '2026-10-09T08:00:00Z' } };
+    if (custom) {
+      rmSync(join(checkout, 'records'), { recursive: true });
+      for (const record of records) writeJson(join(checkout, 'records', 'notices', record.subject.type, `${record.recordId}.json`), record);
+      f.commit = commitFixture(f);
+    }
+    return f;
+  }
   mkdirSync(home); mkdirSync(checkout);
   git(checkout, ['init', '--initial-branch=main']);
   // This URL is only an identity; no fetch or clone is ever performed.
@@ -53,6 +69,25 @@ export function fixture(records = [notice()]) {
   writeJson(join(home, 'notice-policy.json'), { schemaVersion: 1, allowedHosts: ['example.invalid'] });
   writeJson(join(home, 'provider-policy.json'), { schemaVersion: 1, providers: { codex: { sources: { teamShared: 'allow' } } } });
   return { root, home, checkout, repository, commit, options: { runtimeHome: home, env: {}, now: '2026-10-09T08:00:00Z' } };
+}
+
+/** Exercise simultaneous library calls without loading the entire CLI in each process. */
+export function noticeWorkers(calls) {
+  const gate = new SharedArrayBuffer(4);
+  let ready = 0;
+  return Promise.all(calls.map((call) => new Promise((resolve, reject) => {
+    const worker = new Worker(new URL('./notice-worker.mjs', import.meta.url), { workerData: { ...call, gate } });
+    worker.on('message', (message) => {
+      if (message.ready) {
+        if (++ready === calls.length) {
+          Atomics.store(new Int32Array(gate), 0, 1);
+          Atomics.notify(new Int32Array(gate), 0);
+        }
+      } else resolve(message.result);
+    });
+    worker.on('error', reject);
+    worker.on('exit', (code) => { if (code) reject(new Error(`Notice worker exited: ${code}`)); });
+  })));
 }
 
 export function commitFixture(f) {

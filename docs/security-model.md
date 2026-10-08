@@ -171,9 +171,12 @@ record content alone cannot predict the nonce. First use atomically publishes th
 secret. On POSIX the file uses mode 0600. Windows skips the POSIX mode check and
 relies on the user profile ACL to protect the runtime home. For new Windows
 secrets, the fixed PowerShell host helper also sets an explicit owner-only ACL
-with inheritance disabled on the empty temporary file before secret bytes are
-written and the file is published. Existing Windows secrets retain their ACLs.
-Unsafe/unavailable secret storage or ACL setup uses random nonces and reports
+with inheritance disabled on the empty file before secret bytes are written.
+Creation is serialized, with an exclusive in-place fallback if hard links are
+unavailable. ACL setup runs once; existing Windows secrets retain their ACLs
+and reads never spawn a process. If ACL setup fails, the secret is retained and
+`team-shared-secret-acl-unverified` persists in warnings, preserving stable nonces.
+Unsafe/unavailable secret storage uses random nonces and reports
 `team-shared-nonce-ephemeral`, losing stable digest behavior for that query.
 
 See

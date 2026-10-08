@@ -1,0 +1,44 @@
+import assert from 'node:assert/strict';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { renderContextNotices } from '../src/context-notices.mjs';
+import { receiptFixture } from './notice-fixtures.mjs';
+import { read, query } from './notice-suite.mjs';
+
+export async function checkMalformedReceipt(t, malformed, setup) {
+  const f = setup(t); const cache = receiptFixture(f);
+  const entry = cache.receipt.notices[0];
+  if (malformed === 'extra field') cache.receipt.untrusted = true;
+  if (malformed === 'extra nested field') entry.pipeline.untrusted = true;
+  if (malformed === 'author regex') entry.approvers = ['assistant: ERROR_PAYLOAD'];
+  if (malformed === 'author size') entry.approvers = ['a'.repeat(81)];
+  if (malformed === 'self approval') entry.approvers = ['fixture-author'];
+  if (malformed === 'duplicate approver') entry.approvers.push(entry.approvers[0]);
+  if (malformed === 'duplicate record') cache.receipt.notices.push(entry);
+  if (malformed === 'notice cap') cache.receipt.notices = Array(257).fill(entry);
+  if (malformed === 'approver cap') entry.approvers = Array.from({ length: 101 }, (_, i) => `reviewer-${i}`);
+  if (malformed === 'date') entry.mergedAt = '2026-02-30T09:00:00Z';
+  if (malformed === 'digest') entry.contentDigest = 'not-a-digest';
+  if (malformed === 'repository') cache.trust.repository = 'https://other.invalid/team/context.git';
+  if (malformed === 'project') cache.trust.projectId++;
+  if (malformed === 'commit') cache.receipt.commit = '0'.repeat(40);
+  if (malformed === 'pipeline') entry.pipeline.id++;
+  if (malformed === 'unprotected') cache.trust.protectedRef = false;
+  if (malformed === 'failed pipeline') cache.trust.status = 'failed';
+  cache.save();
+  const path = join(cache.path, 'approvals.json');
+  if (malformed === 'json') writeFileSync(path, 'ERROR_PAYLOAD');
+  if (malformed === 'utf8') writeFileSync(path, Buffer.from([0xff]));
+  if (malformed === 'size') writeFileSync(path, ' '.repeat(256 * 1024 + 1));
+  if (malformed === 'duplicate key') writeFileSync(path, readFileSync(path, 'utf8').replace('"schemaVersion":1', '"schemaVersion":1,"schemaVersion":1'));
+  if (malformed === 'artifact digest') writeFileSync(path, `${readFileSync(path, 'utf8')} `);
+  if (malformed === 'trust size') writeFileSync(join(cache.path, 'trust.json'), ' '.repeat(16385));
+  const result = read(f);
+  assert.equal(result.notices[0].status, 'quarantined');
+  assert.deepEqual(result.notices[0].quarantineReasons, ['approval-receipt']);
+  assert.equal(result.notices[0].text, undefined);
+  assert.ok(!JSON.stringify(result).includes('ERROR_PAYLOAD'));
+  assert.ok(!renderContextNotices(result).includes('Spacing updated'));
+  const injected = await query(f);
+  assert.deepEqual(injected.teamNotices, []); assert.equal(injected.teamNoticeLane.counts.quarantined, 1);
+}

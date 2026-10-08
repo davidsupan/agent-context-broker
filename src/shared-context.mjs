@@ -78,7 +78,8 @@ function git(root, args, maxBuffer = 1024 * 1024) {
 function checkoutAge(root, ref, now) {
   // Ref/HEAD mtimes do not lie about an old checkout just because its commit is recent.
   // FETCH_HEAD is a conservative freshness hint; a host may maintain a commit-bound receipt below.
-  const paths = ['HEAD', ref, 'FETCH_HEAD', 'packed-refs'].map((p) => git(root, ['rev-parse', '--git-path', p]).toString().trim());
+  const paths = git(root, ['rev-parse', '--path-format=absolute',
+    ...['HEAD', ref, 'FETCH_HEAD', 'packed-refs'].flatMap((p) => ['--git-path', p])]).toString().trim().split(/\r?\n/u);
   const times = paths.map((p) => resolve(root, p)).filter(existsSync).map((p) => statSync(p).mtimeMs);
   return Math.max(0, Math.floor((now - Math.max(...times)) / 1000));
 }
@@ -110,7 +111,7 @@ export function readSharedContext(options) {
     const ref = `refs/remotes/${remote}/${config.protectedBranch}`;
     const tip = git(root, ['rev-parse', '--verify', `${ref}^{commit}`]).toString().trim();
     git(root, ['merge-base', '--is-ancestor', commit, tip]);
-    let age = checkoutAge(root, ref, now);
+    let age;
     const metadata = home ? readLocalPolicy(join(home, 'team-shared-metadata.json')) : null;
     if (metadata) {
       const parsed = metadataSchema.safeParse(metadata);
@@ -123,6 +124,7 @@ export function readSharedContext(options) {
         }
       }
     }
+    age ??= checkoutAge(root, ref, now);
     const provenance = { repository: identity, commit, checkoutAgeSeconds: age, stale: age > 86400 };
     const tree = git(root, ['ls-tree', '-r', '-z', '-l', commit, '--', 'records/notices/']).toString('utf8').split('\0').filter(Boolean);
     if (tree.length > 512) throw new Error('size');

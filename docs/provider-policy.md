@@ -279,9 +279,14 @@ its own remaining session budget across calls. Lint and framing reduce risk;
 they cannot prove that arbitrary prose is harmless to a model.
 
 On first use, the reader atomically publishes a random 32-byte secret at
-`<runtime-home>/team-shared/nonce-secret` using exclusive hard-link creation.
-Concurrent readers use the winning secret; temporary files are removed. The
-file is created with mode 0600 on systems supporting POSIX permissions. The
+`<runtime-home>/team-shared/nonce-secret` using exclusive hard-link creation,
+with an exclusive in-place create when the filesystem cannot create hard links.
+A creation lock keeps concurrent readers from observing incomplete bytes;
+temporary files and the lock are removed after initialization. The file is
+created with mode 0600 on systems supporting POSIX permissions. Windows applies
+an owner-only ACL once, at creation, through the fixed system PowerShell host.
+An ACL failure retains the secret and reports `team-shared-secret-acl-unverified`,
+including on later reads; reads never launch PowerShell or reapply the ACL. The
 secret is never logged, included in output or read from the shared checkout.
 If the secret cannot be created/read safely, rendering uses a fresh random
 128-bit nonce and emits `team-shared-nonce-ephemeral` in query/list/show warnings
