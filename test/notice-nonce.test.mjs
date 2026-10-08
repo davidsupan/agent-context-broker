@@ -219,3 +219,31 @@ test('a secret directory stays fail closed without acquiring a lock', () => {
   assert.ok(statSync(path).isDirectory());
   assert.ok(!existsSync(join(home, 'team-shared/.nonce-lock')));
 });
+
+test('delete-pending lock errors on win32 are retried instead of switching to an ephemeral nonce', () => {
+  const home = mkdtempSync(join(root, 'home-'));
+  let denied = 0;
+  const pending = (operation) => (path) => {
+    if (denied < 3) { denied++; throw Object.assign(new Error('delete pending'), { code: denied === 2 ? 'EACCES' : 'EPERM' }); }
+    return operation(path);
+  };
+  const first = render(home, { platform: 'win32', host, spawn() {}, mkdir: pending(mkdirSync) });
+  const second = render(home, { platform: 'win32', host, spawn() { throw new Error('reads must not spawn'); } });
+  assert.equal(denied, 3);
+  assert.deepEqual(first.warnings, []);
+  assert.deepEqual(second.warnings, []);
+  assert.deepEqual(first.lane, second.lane);
+  assert.deepEqual(first.notices, second.notices);
+  assert.ok(!existsSync(join(home, 'team-shared/.nonce-lock')));
+});
+
+test('a lock that cannot be removed keeps the complete secret and only warns', () => {
+  const home = mkdtempSync(join(root, 'home-'));
+  const first = render(home, { platform: 'win32', host, spawn() {}, waitMs: 50,
+    rmdir() { throw Object.assign(new Error('busy'), { code: 'EBUSY' }); } });
+  assert.deepEqual(first.warnings, ['team-shared-secret-lock-left']);
+  assert.equal(readFileSync(join(home, 'team-shared/nonce-secret')).length, 32);
+  const second = render(home, { platform: 'win32', host, spawn() { throw new Error('reads must not spawn'); } });
+  assert.deepEqual(second.warnings, []);
+  assert.deepEqual(first.lane, second.lane);
+});

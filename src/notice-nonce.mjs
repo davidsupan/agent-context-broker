@@ -7,7 +7,8 @@ import { windowsHost } from '../distillation/src/windows-host.mts';
 export const PENDING_NOTICE_NONCE = '0'.repeat(32);
 
 /** @typedef {{platform?: NodeJS.Platform, spawn?: typeof execFileSync, link?: typeof linkSync,
- * host?: typeof windowsHost, open?: typeof openSync, waitMs?: number}} NonceDependencies */
+ * host?: typeof windowsHost, open?: typeof openSync, waitMs?: number,
+ * mkdir?: typeof mkdirSync, rmdir?: typeof rmdirSync}} NonceDependencies */
 
 /** Protect the empty file before it contains secret bytes.
  * @param {string} path @param {NonceDependencies} dependencies */
@@ -46,6 +47,20 @@ function installationSecret(home, warnings, dependencies) {
     if (Date.now() >= deadline) throw new Error('nonce-busy');
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
   };
+  const transient = (/** @type {string|undefined} */ code) => code === 'EPERM' || code === 'EACCES' || code === 'EBUSY';
+  // A lock that cannot be removed must not discard a complete secret: readers bypass it
+  // once the secret is complete, and a later creator reclaims it as stale.
+  const releaseLock = () => {
+    for (;;) {
+      try { (dependencies.rmdir ?? rmdirSync)(lock); return; }
+      catch (error) {
+        const code = /** @type {NodeJS.ErrnoException} */ (error).code;
+        if (code === 'ENOENT') return;
+        if (!transient(code) || Date.now() >= deadline) { warnings.push('team-shared-secret-lock-left'); return; }
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+      }
+    }
+  };
   const secretInfo = () => {
     const info = lstatSync(path, { throwIfNoEntry: false });
     if (info && (!info.isFile() || (info.size !== 0 && info.size !== 32))) throw new Error('nonce-file');
@@ -54,10 +69,20 @@ function installationSecret(home, warnings, dependencies) {
   // A complete secret is immutable: readers never touch or wait on the lock.
   if (secretInfo()?.size !== 32) {
     for (;;) {
-      try { mkdirSync(lock); break; }
+      try { (dependencies.mkdir ?? mkdirSync)(lock); break; }
       catch (error) {
-        if (/** @type {NodeJS.ErrnoException} */ (error).code !== 'EEXIST') throw error;
-        const info = lstatSync(lock, { throwIfNoEntry: false });
+        const code = /** @type {NodeJS.ErrnoException} */ (error).code;
+        // Windows keeps a removed directory name delete-pending while another reader
+        // still holds a handle; mkdir and lstat then report access denied, not EEXIST.
+        if (transient(code)) { pause(); continue; }
+        if (code !== 'EEXIST') throw error;
+        let info;
+        try { info = lstatSync(lock, { throwIfNoEntry: false }); }
+        catch (error) {
+          if (!transient(/** @type {NodeJS.ErrnoException} */ (error).code)) throw error;
+          pause();
+          continue;
+        }
         if (!info) continue;
         if (info.isDirectory() && Date.now() - info.mtimeMs > 60000) {
           try {
@@ -71,7 +96,7 @@ function installationSecret(home, warnings, dependencies) {
             // Windows can report access denied while another reader removes the
             // directory. Retry acquisition within the same bounded wait budget.
             if (code !== 'ENOENT') {
-              if (code !== 'EPERM' && code !== 'EACCES') throw error;
+              if (!transient(code)) throw error;
               pause();
             }
           }
@@ -118,7 +143,7 @@ function installationSecret(home, warnings, dependencies) {
           }
         } finally { if (existsSync(temporary)) unlinkSync(temporary); }
       }
-    } finally { rmdirSync(lock); }
+    } finally { releaseLock(); }
   }
   const info = lstatSync(path);
   if (info.isSymbolicLink() || !info.isFile()) throw new Error('nonce-file');
