@@ -307,6 +307,28 @@ export function verifiedSnapshotFile(root, registryEntry, onFiltered = null) {
 
 const SNAPSHOT_ROLE_RANK = { primary: 0, 'ambient-project': 1, 'ambient-global': 2 };
 
+/** Local routing evidence only; never render or query accepted values.
+ * @param {string} registryPath @param {string} provider @param {Date} now
+ * @returns {Set<string>}
+ */
+export function acceptedTicketKeysForProvider(registryPath, provider, now) {
+  const keys = new Set();
+  const registry = readJson(registryPath);
+  if (registry?.schemaVersion !== 1 || !Array.isArray(registry.snapshots)) return keys;
+  const root = dirname(registryPath);
+  for (const entry of registry.snapshots) {
+    try {
+      const snapshot = verifiedSnapshotFile(root, entry);
+      if (snapshot.scope.kind !== 'ticket') continue;
+      if (snapshot.claimIds.some((/** @type {string} */ id) =>
+        verifiedClaim(root, id, 0, now).providers.includes(provider))) keys.add(snapshot.scope.key);
+    } catch {
+      // Unverifiable records cannot establish ownership of a prompt-derived key.
+    }
+  }
+  return keys;
+}
+
 /**
  * Where a related snapshot ranks before the snapshot cap: by its own scope's role in the query (the requested scope,
  * then the ambient project, then global rules, then any other related scope, then a snapshot related only through

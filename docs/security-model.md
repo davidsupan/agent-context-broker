@@ -8,6 +8,17 @@ or credentials to another agent.
 ## Trust boundaries
 
 - Accepted claims require reconciliation and content-addressed snapshots.
+- Ticket and MR keys extracted from prompts are untrusted input. Sample keys or
+  another team's references cannot route lifecycle context without local evidence:
+  a ticket's branch, validated package, prior evidenced session route, or verified
+  same-provider work in that exact scope; an MR's review ledger or prior evidenced
+  session route. Other-provider and merely related records do not establish this
+  evidence. Explicit caller scopes retain their existing behavior.
+- Unconfirmed prompt keys are trace-only suggestions containing kind, SHA-256 of
+  the lowercase key, and `no-local-evidence`. Raw keys and suggestion prose are
+  not added to advisories. Session routing history stores relation hashes only.
+  Routing evidence does not bypass provider read policy or promote peer progress
+  into accepted claims, and requires no network access.
 - Live peer progress is always labelled unverified and expires by TTL.
 - Publications require a source token backed by the same verified event store.
 - Strict isolation returns before reading registries or writing audits.

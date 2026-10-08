@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "note": "Known tsc --checkJs errors; only shrinks (scripts/check-types.mjs --update).",
-  "total": 1310,
+  "total": 1307,
   "errors": {
     "providers/claude-code/src/bridge.mjs | TS7006 | Parameter 'eventName' implicitly has an 'any' type.": 1,
     "providers/claude-code/src/bridge.mjs | TS7053 | Element implicitly has an 'any' type because expression of type 'any' can't be used to index type '{ SessionStart: string; SessionEnd: string; }'.": 1,
@@ -495,7 +495,6 @@
     "src/installation.mjs | TS7053 | Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{ codex: any; claude: any; }'.": 2,
     "src/installation.mjs | TS7053 | Element implicitly has an 'any' type because expression of type 'string' can't be used to index type 'Readonly<{ codex: Readonly<{ targetName: \"codex-hooks\"; homeName: \".codex\"; configName: \"hooks.json\"; cliPath: string[]; events: readonly (Readonly<{ name: \"SessionStart\"; matcher: \"startup|resume|clear|compact\"; timeout: 15; statusMessage: \"Checking reconciled context\"; additionalContextLimit: 500; }> | Readonly<.....'.": 2,
     "src/lifecycle-consumer.mjs | TS18047 | 'sourcePlan' is possibly 'null'.": 1,
-    "src/lifecycle-consumer.mjs | TS18048 | 'cwdMatch.groups' is possibly 'undefined'.": 2,
     "src/lifecycle-consumer.mjs | TS18048 | 'match.groups' is possibly 'undefined'.": 2,
     "src/lifecycle-consumer.mjs | TS18048 | 'ref.groups' is possibly 'undefined'.": 1,
     "src/lifecycle-consumer.mjs | TS18048 | 'target.groups' is possibly 'undefined'.": 1,
@@ -514,7 +513,7 @@
     "src/lifecycle-consumer.mjs | TS7006 | Parameter 'delta' implicitly has an 'any' type.": 6,
     "src/lifecycle-consumer.mjs | TS7006 | Parameter 'deltas' implicitly has an 'any' type.": 1,
     "src/lifecycle-consumer.mjs | TS7006 | Parameter 'error' implicitly has an 'any' type.": 1,
-    "src/lifecycle-consumer.mjs | TS7006 | Parameter 'event' implicitly has an 'any' type.": 3,
+    "src/lifecycle-consumer.mjs | TS7006 | Parameter 'event' implicitly has an 'any' type.": 2,
     "src/lifecycle-consumer.mjs | TS7006 | Parameter 'inputDefinition' implicitly has an 'any' type.": 1,
     "src/lifecycle-consumer.mjs | TS7006 | Parameter 'item' implicitly has an 'any' type.": 6,
     "src/lifecycle-consumer.mjs | TS7006 | Parameter 'key' implicitly has an 'any' type.": 1,

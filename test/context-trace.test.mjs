@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
-import { copyFileSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -24,7 +24,7 @@ const scope = { kind: 'project', key: 'sample' };
 const providers = ['codex', 'claude-code'];
 const marker = 'VALUE_MUST_NEVER_APPEAR_IN_TRACE';
 const layerIds = ['accepted-primary', 'accepted-ambient-project', 'accepted-ambient-global',
-  'accepted-related', 'peer-progress', 'notices', 'artifact-evidence', 'policy', 'budget'];
+  'accepted-related', 'suggested-scopes', 'peer-progress', 'notices', 'artifact-evidence', 'policy', 'budget'];
 
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
@@ -155,7 +155,7 @@ test('accepted scope roles and provider policy denials use only relation hashes'
   await publish(h, [{}], { kind: 'global', key: 'rules' });
   const primary = await planContextQuery({ ...options(h), trace: true });
   assert.deepEqual(primary.trace.layers.map(item => item.state),
-    ['used', 'empty', 'used', 'empty', 'empty', 'off', 'off', 'empty', 'used']);
+    ['used', 'empty', 'used', 'empty', 'empty', 'empty', 'off', 'off', 'empty', 'used']);
   assert.equal(primary.trace.layers[0].included, 1);
   assert.equal(primary.trace.layers[2].included, 1);
   valid(primary.trace);
@@ -165,14 +165,14 @@ test('accepted scope roles and provider policy denials use only relation hashes'
   valid(result.trace);
   const restricted = await planContextQuery({ ...base, providerPolicy: { schemaVersion: 1, providers: { [providers[0]]: { read: { allow: ['ticket:*'] } } } } });
   assert.deepEqual(restricted.trace.policy.map((item) => item.reason), ['ambient-project-denied', 'ambient-global-denied']);
-  assert.deepEqual(restricted.trace.layers[7], { id: 'policy', state: 'used', included: 0,
+  assert.deepEqual(restricted.trace.layers[8], { id: 'policy', state: 'used', included: 0,
     excluded: 2, reasons: { 'ambient-project-denied': 1, 'ambient-global-denied': 1 }, detail: 'policy' });
   valid(restricted.trace);
   const denied = await planContextQuery({ ...base, providerPolicy: { schemaVersion: 1, providers: { [providers[0]]: { strictIsolation: true } } } });
   assert.deepEqual(denied.trace.policy, [{ relationKey: scopeRelation('ticket', 'TASK-1'), reason: 'query-denied' }]);
   assert.deepEqual(denied.trace.layers.map(item => item.state),
-    ['empty', 'empty', 'empty', 'empty', 'empty', 'off', 'off', 'denied', 'used']);
-  assert.equal(denied.trace.layers[7].reasons['query-denied'], 1);
+    ['empty', 'empty', 'empty', 'empty', 'empty', 'empty', 'off', 'off', 'denied', 'used']);
+  assert.equal(denied.trace.layers[8].reasons['query-denied'], 1);
   valid(denied.trace);
 });
 
@@ -235,7 +235,7 @@ test('schema rejects values, missing decision reasons and unknown fields', async
     (copy) => { copy.layers.reverse(); },
     (copy) => { copy.layers[0].state = 'unknown'; },
     (copy) => { copy.layers[0].included = -1; },
-    (copy) => { delete copy.layers[8].limit; },
+    (copy) => { delete copy.layers[9].limit; },
     (copy) => { copy.lifecycle = { advisoryReferences: 1, claimsInjected: 1 }; }
   ]) {
     const copy = structuredClone(trace);
@@ -285,7 +285,7 @@ test('both lifecycle adapters preserve the exact origin/main advisory with accep
       assert.deepEqual(artifact.trace.candidates, []);
       assert.deepEqual(artifact.trace.lifecycle, { advisoryReferences: minute === '00' ? 1 : 0, claimsInjected: 0 });
       assert.deepEqual(artifact.trace.layers.map(item => item.state),
-        ['off', 'off', 'off', 'off', 'empty', 'off', 'off', 'empty', 'used']);
+        ['off', 'off', 'off', 'off', 'empty', 'empty', 'off', 'off', 'empty', 'used']);
       assert.equal(artifact.trace.budget.renderedContextBytes, Buffer.byteLength(artifact.payload));
       refs.push(artifact.threadRef);
       valid(artifact.trace);
@@ -335,7 +335,7 @@ test('lifecycle layers describe peer delivery, deduplication and policy without 
     assert.deepEqual(trace.candidates, []);
     assert.deepEqual(trace.lifecycle, { advisoryReferences: 0, claimsInjected: 0 });
     assert.deepEqual(trace.layers.map(item => item.state),
-      ['off', 'off', 'off', 'off', minute === '02' ? 'empty' : 'used', 'off', 'off',
+      ['off', 'off', 'off', 'off', 'empty', minute === '02' ? 'empty' : 'used', 'off', 'off',
         minute === '02' ? 'denied' : 'empty', 'used']);
     assert.equal(artifact.payload.includes(marker), false);
     if (minute === '00') {
@@ -350,15 +350,15 @@ test('lifecycle layers describe peer delivery, deduplication and policy without 
         'No raw peer conversation content was imported.'
       ].join('\n'));
       assert.equal(result.hookSpecificOutput.additionalContext, artifact.payload);
-      assert.equal(trace.layers[4].included, 1);
+      assert.equal(trace.layers[5].included, 1);
       assert.deepEqual(trace.scopes, [{ relationKey: scopeRelation(scope.kind, scope.key), role: 'primary' }]);
     } else {
       assert.deepEqual(result, { continue: true });
       assert.equal(artifact.payload, '');
       if (minute === '01') {
         assert.equal(trace.peerProgress[0].reason, 'already-delivered');
-        assert.deepEqual(trace.layers[4].reasons, { 'already-delivered': 1 });
-        assert.equal(trace.layers[4].excluded, 1);
+        assert.deepEqual(trace.layers[5].reasons, { 'already-delivered': 1 });
+        assert.equal(trace.layers[5].excluded, 1);
       }
     }
   }
@@ -366,14 +366,199 @@ test('lifecycle layers describe peer delivery, deduplication and policy without 
 
 test('notice layer remains off until a lane is present, then maps its state and counts', () => {
   const trace = createContextTrace();
-  assert.deepEqual(trace.layers[5], { id: 'notices', state: 'off', included: 0, excluded: 0, reasons: {}, detail: null });
+  assert.deepEqual(trace.layers[6], { id: 'notices', state: 'off', included: 0, excluded: 0, reasons: {}, detail: null });
   for (const state of ['used', 'empty', 'off', 'denied', 'error']) {
     trace.layers = traceLayers(trace, { teamNoticeLane: { state, counts: {
       included: 2, read: 1, quarantined: 2, hiddenByAudience: 3, omittedByBudget: 4, unverified: 5
     } } });
-    assert.deepEqual(trace.layers[5], { id: 'notices', state, included: 2, excluded: 15,
+    assert.deepEqual(trace.layers[6], { id: 'notices', state, included: 2, excluded: 15,
       reasons: { read: 1, quarantined: 2, hiddenByAudience: 3, omittedByBudget: 4, unverified: 5 }, detail: 'notices' });
     valid(trace);
+  }
+});
+
+function routingHarness(h, provider = providers[0]) {
+  const runtimeRoot = join(h.root, 'lifecycle');
+  const ticketPackagesRoot = join(h.root, 'tickets');
+  const reviewLedgersRoot = join(h.root, 'reviews');
+  const consumer = createLifecycleConsumer({ provider, adapterRoot: packageRoot,
+    adapterModule: provider === 'codex' ? 'codex-inventory-v2.mjs' : 'claude-inventory.mjs',
+    runtimeRoot, eventRuntimeRoot: h.events, contextRuntimeRoot: h.runtime,
+    globalAuditDirectory: h.audit, ticketPackagesRoot, reviewLedgersRoot,
+    supportedEvents: ['UserPromptSubmit'], advisoryEvents: ['UserPromptSubmit'], allowedTranscriptRoots: () => [] });
+  const ticket = (key) => {
+    const directory = join(ticketPackagesRoot, key);
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(join(directory, 'jira-context.json'), JSON.stringify({ issue: { key }, relatedTickets: {} }));
+    return directory;
+  };
+  const review = (key) => {
+    const directory = join(reviewLedgersRoot, `mr-${key.split('!')[1]}`);
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(join(directory, 'metadata.json'), JSON.stringify({ references: { full: key } }));
+    return directory;
+  };
+  const run = async (prompt, event = {}, options = {}) => {
+    const session = event.session_id ?? randomUUID();
+    const auditDirectory = join(runtimeRoot, 'audit');
+    const priorAudits = new Set(existsSync(auditDirectory) ? readdirSync(auditDirectory) : []);
+    const result = await consumer.handleHookEvent({ hook_event_name: 'UserPromptSubmit', session_id: session,
+      transcript_path: join(h.root, 'missing.jsonl'), prompt, ...event }, { testMode: true, now, ...options });
+    const audit = readdirSync(auditDirectory).filter(name => !priorAudits.has(name)).map(name =>
+      JSON.parse(readFileSync(join(runtimeRoot, 'audit', name), 'utf8')))
+      .filter(item => item.sessionKey === hash(`${provider}-consumer:${session}`)).at(-1);
+    const artifact = JSON.parse(readFileSync(join(h.audit, audit.injectionArtifact), 'utf8'));
+    valid(artifact.trace);
+    const state = JSON.parse(readFileSync(join(runtimeRoot, 'state', `${hash(`${provider}-consumer:${session}`)}.json`), 'utf8'));
+    return { result, artifact, state, audit };
+  };
+  return { ticket, review, run };
+}
+
+const suggested = (kind, key) => ({ kind, keyHash: hash(key.toLowerCase()), reason: 'no-local-evidence' });
+function routed(result, kind, key) {
+  assert.ok(result.artifact.trace.scopes.some(item => item.role === 'primary' && item.relationKey === scopeRelation(kind, key)));
+  assert.equal(result.audit.peerScopeKind, kind);
+}
+
+test('untrusted sample keys only add hashed suggestions and leave both provider advisories unchanged', async () => {
+  for (const provider of providers) {
+    const h = home();
+    const r = routingHarness(h, provider);
+    const source = join(h.root, 'source.jsonl');
+    copyFileSync(join(packageRoot, 'fixtures', provider === 'codex' ? 'codex-active.jsonl' : 'claude-active.jsonl'), source);
+    const control = await routingHarness(home(), provider).run('Continue', { transcript_path: source });
+    const sample = await r.run('Continue SAMPLE-123', { transcript_path: source });
+    assert.deepEqual(sample.result, control.result);
+    assert.equal(sample.artifact.payload, control.artifact.payload);
+    assert.equal(sample.audit.peerScopeKind, null);
+    assert.deepEqual(sample.state.routedScopes, []);
+    assert.deepEqual(sample.artifact.trace.suggestedScopes, [suggested('ticket', 'SAMPLE-123')]);
+    assert.equal(JSON.stringify(sample.artifact).includes('SAMPLE-123'), false);
+    assert.deepEqual(sample.artifact.trace.layers[4], { id: 'suggested-scopes', state: 'used', included: 0,
+      excluded: 1, reasons: { 'no-local-evidence': 1 }, detail: 'suggestedScopes' });
+    const partial = await r.run('SAMPLE-123');
+    assert.deepEqual(partial.result, { continue: true });
+    assert.equal(partial.artifact.payload, '');
+    assert.deepEqual(partial.artifact.trace.suggestedScopes, [suggested('ticket', 'SAMPLE-123')]);
+    routed(await r.run('SAMPLE-123', {}, { defaultProjectKey: 'sample' }), 'project', 'sample');
+  }
+});
+
+test('ticket package, branch and unique evidence resolve prompt keys; ambiguity retains branch fallback', async (t) => {
+  const previous = process.env.AGENT_CONTEXT_BROKER_TICKET_PROJECTS;
+  process.env.AGENT_CONTEXT_BROKER_TICKET_PROJECTS = 'TASK';
+  t.after(() => {
+    if (previous === undefined) delete process.env.AGENT_CONTEXT_BROKER_TICKET_PROJECTS;
+    else process.env.AGENT_CONTEXT_BROKER_TICKET_PROJECTS = previous;
+  });
+  const h = home();
+  const r = routingHarness(h);
+  r.ticket('TASK-1');
+  const one = await r.run('TASK-1');
+  routed(one, 'ticket', 'TASK-1');
+  assert.deepEqual(one.artifact.trace.suggestedScopes, []);
+  const two = await r.run('SAMPLE-123 TASK-1');
+  routed(two, 'ticket', 'TASK-1');
+  assert.deepEqual(two.artifact.trace.suggestedScopes, [suggested('ticket', 'SAMPLE-123')]);
+  const cwd = join(h.root, 'checkout');
+  mkdirSync(join(cwd, '.git'), { recursive: true });
+  writeFileSync(join(cwd, '.git', 'HEAD'), 'ref: refs/heads/feature/TASK-2-work\n');
+  routed(await r.run('TASK-2', { cwd }), 'ticket', 'TASK-2');
+  routed(await r.run('SAMPLE-123', { cwd }), 'ticket', 'TASK-2');
+  routed(await r.run('SAMPLE-123 TASK-2', { cwd }), 'ticket', 'TASK-2');
+  routed(await r.run('TASK-1 TASK-2', { cwd }), 'ticket', 'TASK-2');
+  const ambiguous = await r.run('SAMPLE-123 OTHER-1', {}, { defaultProjectKey: 'sample' });
+  assert.equal(ambiguous.audit.peerScopeKind, null);
+  assert.equal(ambiguous.artifact.trace.layers[4].excluded, 2);
+});
+
+test('missing, empty, corrupt and mismatched package metadata cannot route or poison session history', async () => {
+  const h = home();
+  const r = routingHarness(h);
+  const directory = join(h.root, 'tickets', 'TASK-1');
+  mkdirSync(directory, { recursive: true });
+  for (const content of [null, '{', JSON.stringify({ issue: { key: 'OTHER-1' }, relatedTickets: {} })]) {
+    if (content) writeFileSync(join(directory, 'jira-context.json'), content);
+    const result = await r.run('TASK-1', { session_id: 'untrusted' });
+    assert.equal(result.audit.peerScopeKind, null);
+    assert.deepEqual(result.state.routedScopes, []);
+    assert.deepEqual(result.artifact.trace.suggestedScopes, [suggested('ticket', 'TASK-1')]);
+  }
+});
+
+test('MR references require their ledger identity and support URLs, ambiguity and session reuse', async () => {
+  const h = home();
+  const r = routingHarness(h);
+  const key = 'sample/project!42';
+  const absent = await r.run(key, {}, { defaultProjectKey: 'sample' });
+  routed(absent, 'project', 'sample');
+  assert.deepEqual(absent.artifact.trace.suggestedScopes, [suggested('merge-request', key)]);
+  r.review('other/project!42');
+  const wrong = await r.run(key);
+  assert.equal(wrong.audit.peerScopeKind, null);
+  const directory = r.review(key);
+  const first = await r.run(`https://git.example.test/sample/project/-/merge_requests/42`, { session_id: 'review' });
+  routed(first, 'merge-request', key);
+  assert.deepEqual(first.artifact.trace.suggestedScopes, []);
+  routed(await r.run(`${key} sample/project!43`), 'merge-request', key);
+  rmSync(directory, { recursive: true });
+  routed(await r.run(key, { session_id: 'review' }), 'merge-request', key);
+  assert.equal((await r.run(key)).audit.peerScopeKind, null);
+});
+
+test('evidenced ticket routes survive package removal in the same session, with and without a transcript', async () => {
+  for (const transcript of [false, true]) {
+    const h = home();
+    const r = routingHarness(h);
+    const event = { session_id: 'remembered' };
+    if (transcript) {
+      event.transcript_path = join(h.root, 'source.jsonl');
+      copyFileSync(join(packageRoot, 'fixtures', 'codex-active.jsonl'), event.transcript_path);
+    }
+    const directory = r.ticket('TASK-1');
+    const first = await r.run('TASK-1', event);
+    assert.deepEqual(first.state.routedScopes, [scopeRelation('ticket', 'TASK-1')]);
+    rmSync(directory, { recursive: true });
+    routed(await r.run('TASK-1', event), 'ticket', 'TASK-1');
+    assert.equal((await r.run('TASK-1')).audit.peerScopeKind, null);
+  }
+});
+
+test('accepted and peer evidence require the current provider and exact scope, not related scopes', async () => {
+  for (const lane of ['accepted', 'peer']) {
+    const h = home();
+    const key = 'TASK-1';
+    const ticketScope = { kind: 'ticket', key };
+    const owner = lane === 'accepted' ? providers[0] : providers[1];
+    if (lane === 'accepted') await publish(h, [{}], ticketScope,
+      [scopeRelation('ticket', key), scopeRelation('ticket', 'TASK-2')]);
+    else await progress(h, 'routing', { scope: ticketScope, relatedScopes: [
+      { kind: 'ticket', key: 'TASK-2' }
+    ] });
+    routed(await routingHarness(h, owner).run(key), 'ticket', key);
+    const other = await routingHarness(h, providers.find(provider => provider !== owner)).run(key);
+    assert.equal(other.audit.peerScopeKind, null);
+    assert.deepEqual(other.artifact.trace.suggestedScopes, [suggested('ticket', key)]);
+    assert.equal((await routingHarness(h, owner).run('TASK-2')).audit.peerScopeKind, null);
+  }
+});
+
+test('explicit query scopes remain usable without prompt evidence and suggestion schema is hash-only', async () => {
+  const h = home();
+  const result = await planContextQuery({ ...options(h), scopeKind: 'ticket', scopeKey: 'SAMPLE-123', trace: true });
+  assert.ok(result.trace.scopes.some(item => item.relationKey === scopeRelation('ticket', 'SAMPLE-123')));
+  assert.deepEqual(result.trace.suggestedScopes, []);
+  valid(result.trace);
+  const trace = (await routingHarness(h).run('SAMPLE-123')).artifact.trace;
+  for (const mutation of [
+    copy => { copy.suggestedScopes[0].key = 'SAMPLE-123'; },
+    copy => { copy.suggestedScopes[0].keyHash = 'SAMPLE-123'; },
+    copy => { copy.suggestedScopes[0].reason = 'guess'; }
+  ]) {
+    const copy = structuredClone(trace);
+    mutation(copy);
+    assert.equal(validator.safeParse(copy).success, false);
   }
 });
 

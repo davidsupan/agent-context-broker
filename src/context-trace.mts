@@ -18,10 +18,10 @@ export type PeerDecision = {
 };
 export type Layer = {
   id: 'accepted-primary' | 'accepted-ambient-project' | 'accepted-ambient-global' | 'accepted-related' |
-    'peer-progress' | 'notices' | 'artifact-evidence' | 'policy' | 'budget';
+    'suggested-scopes' | 'peer-progress' | 'notices' | 'artifact-evidence' | 'policy' | 'budget';
   state: 'used' | 'empty' | 'off' | 'denied' | 'error';
   included: number; excluded: number; reasons: Record<string, number>;
-  detail: 'candidates' | 'peerProgress' | 'policy' | 'budget' | 'notices' | 'artifacts' | null;
+  detail: 'candidates' | 'suggestedScopes' | 'peerProgress' | 'policy' | 'budget' | 'notices' | 'artifacts' | null;
   limit?: number;
 };
 export type TeamNoticeLane = {
@@ -37,6 +37,7 @@ export type ContextTrace = {
   candidates: (ClaimDecision | ReadLimitDecision)[];
   nearMisses: ClaimDecision[];
   peerProgress: PeerDecision[];
+  suggestedScopes: { kind: 'ticket' | 'merge-request'; keyHash: string; reason: 'no-local-evidence' }[];
   policy: { relationKey: string; reason: 'query-denied' | 'ambient-project-denied' | 'ambient-global-denied' | 'scope-denied' }[];
   budget: { maxSnapshots: number; maxClaims: number; maxContextBytes: number; renderedContextBytes: number };
   lifecycle?: { advisoryReferences: number; claimsInjected: 0 };
@@ -48,7 +49,7 @@ export function createContextTrace(profile?: {
 } | null): ContextTrace {
   const trace: ContextTrace = {
     schemaVersion: 1, scopes: [], snapshots: [], candidates: [], nearMisses: [], peerProgress: [], policy: [],
-    layers: [],
+    layers: [], suggestedScopes: [],
     budget: { maxSnapshots: profile?.maxSnapshots ?? 0, maxClaims: profile?.maxClaims ?? 0,
       maxContextBytes: profile?.maxContextBytes ?? 1024, renderedContextBytes: 0 }
   };
@@ -80,6 +81,8 @@ export function traceLayers(trace: ContextTrace, result?: { teamNoticeLane?: Tea
       const actual = roleFor.get(item.snapshotId) ?? 'related';
       return role === 'related' ? !roles.slice(0, 3).some(known => known === actual) : actual === role;
     }), Boolean(trace.lifecycle)));
+  layers.push(summarize('suggested-scopes', 'suggestedScopes',
+    trace.suggestedScopes.map(item => ({ ...item, decision: 'excluded' }))));
   layers.push(summarize('peer-progress', 'peerProgress', trace.peerProgress));
   const notices = summarize('notices', null, [], true);
   if (result?.teamNoticeLane) {

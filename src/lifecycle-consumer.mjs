@@ -23,9 +23,10 @@ import {
 import { realpathSync as resolvePhysicalPath } from 'node:fs';
 
 import { verifyEventTail } from './event-store.mjs';
-import { scopeRelation } from './context-query.mjs';
+import { acceptedTicketKeysForProvider, scopeRelation } from './context-query.mjs';
 import { createContextTrace, persistQueryInjection, traceCounts, traceLayers } from './context-trace.mts';
-import { readPeerProgress } from './peer-progress.mjs';
+import { peerTicketKeysForProvider, readPeerProgress } from './peer-progress.mjs';
+import { reviewLedgerContext, ticketPackageContext } from './work-ledgers.mts';
 import { loadProviderPolicy, policyEntry, scopeReadable } from './provider-policy.mjs';
 import {
   planSourceAttestation,
@@ -242,10 +243,37 @@ export function branchTicketScope(cwd) {
   }
 }
 
-function safeScopeFromHookEvent(event, defaultProjectKey = null) {
+/** @param {any} event @param {any} options @param {any} state
+ * @param {import('./context-trace.mts').ContextTrace} trace
+ */
+function safeScopeFromHookEvent(event, options, state, trace) {
+  const defaultProjectKey = options.defaultProjectKey;
   const prompt = typeof event?.prompt === 'string' && event.prompt.length <= MAX_HOOK_PROMPT_LENGTH
     ? event.prompt
     : '';
+  const branchScope = branchTicketScope(event?.cwd);
+  const fallback = () => branchScope ?? (defaultProjectKey && prompt.trim()
+    ? { kind: 'project', key: defaultProjectKey } : null);
+  const attempt = (/** @type {() => any} */ read) => {
+    try { return read(); } catch { return null; }
+  };
+  let acceptedTickets;
+  let peerTickets;
+  const hasEvidence = (/** @type {{kind: string, key: string}} */ scope) => {
+    const relationKey = scopeRelation(scope.kind, scope.key);
+    if (Array.isArray(state.routedScopes) && state.routedScopes.includes(relationKey)) return true;
+    if (scope.kind === 'merge-request') {
+      return Boolean(attempt(() => reviewLedgerContext(options.reviewLedgersRoot, scope.key)));
+    }
+    if (branchScope?.key === scope.key ||
+        attempt(() => ticketPackageContext(options.ticketPackagesRoot, scope.key))) return true;
+    acceptedTickets ??= attempt(() => acceptedTicketKeysForProvider(
+      options.acceptedSnapshots, options.provider, options.now)) ?? new Set();
+    if (acceptedTickets.has(scope.key)) return true;
+    peerTickets ??= attempt(() => peerTicketKeysForProvider(
+      options.contextRuntimeRoot, options.eventRuntimeRoot, options.provider)) ?? new Set();
+    return peerTickets.has(scope.key);
+  };
   const reviewKeys = new Set();
   for (const match of prompt.matchAll(
     /https?:\/\/[^/\s]+\/(?<project>[A-Za-z0-9][A-Za-z0-9._/-]{0,95})\/-\/merge_requests\/(?<iid>\d{1,12})\b/giu
@@ -257,14 +285,22 @@ function safeScopeFromHookEvent(event, defaultProjectKey = null) {
   )) {
     reviewKeys.add(`${match.groups.project}!${match.groups.iid}`);
   }
-  if (reviewKeys.size === 1) return { kind: 'merge-request', key: [...reviewKeys][0] };
-  if (reviewKeys.size > 1) return branchTicketScope(event?.cwd);
-
   const issueKeys = [...new Set(
     [...prompt.matchAll(/\b[A-Z][A-Z0-9]{1,15}-\d+\b/gu)].map((match) => match[0].toUpperCase())
   )];
-  if (issueKeys.length === 1) return { kind: 'ticket', key: issueKeys[0] };
-  if (issueKeys.length > 1) return branchTicketScope(event?.cwd);
+  const candidates = [
+    ...[...reviewKeys].map(key => ({ kind: 'merge-request', key })),
+    ...issueKeys.map(key => ({ kind: 'ticket', key }))
+  ];
+  const evidenced = candidates.filter(scope => {
+    if (hasEvidence(scope)) return true;
+    trace.suggestedScopes.push({ kind: /** @type {'ticket' | 'merge-request'} */ (scope.kind),
+      keyHash: hash(scope.key.toLowerCase()), reason: 'no-local-evidence' });
+    return false;
+  });
+  if (evidenced.length === 1) return evidenced[0];
+  if (candidates.length > 1) return branchScope;
+  if (candidates.length) return fallback();
 
   const workstreamKeys = [...new Set(
     [...prompt.matchAll(/\bworkstream(?:\s+|:\s*)([A-Za-z0-9](?:[A-Za-z0-9._:/!-]{0,126}[A-Za-z0-9])?)/giu)]
@@ -273,10 +309,6 @@ function safeScopeFromHookEvent(event, defaultProjectKey = null) {
   if (workstreamKeys.length === 1) return { kind: 'workstream', key: workstreamKeys[0] };
   if (workstreamKeys.length > 1) return branchTicketScope(event?.cwd);
 
-  const cwdMatch = /(?:^|[\\/])(?<project>[A-Z][A-Z0-9]{1,15})[-_](?<number>\d+)(?:[\\/]|$)/u
-    .exec(String(event?.cwd ?? ''));
-  if (cwdMatch) return { kind: 'ticket', key: `${cwdMatch.groups.project}-${cwdMatch.groups.number}` };
-  const branchScope = branchTicketScope(event?.cwd);
   if (branchScope) return branchScope;
   if (defaultProjectKey && prompt.trim()) return { kind: 'project', key: defaultProjectKey };
   return null;
@@ -297,10 +329,10 @@ function safeTermsFromHookEvent(event) {
   )].slice(0, 8);
 }
 
-/** @param {any} event @param {any} options @param {import('./context-trace.mts').ContextTrace} trace */
-function naturalPeerProgress(event, options, trace) {
+/** @param {any} event @param {any} options @param {import('./context-trace.mts').ContextTrace} trace @param {any} state */
+function naturalPeerProgress(event, options, trace, state) {
   if (event?.hook_event_name !== 'UserPromptSubmit') return null;
-  const scope = safeScopeFromHookEvent(event, options.defaultProjectKey);
+  const scope = safeScopeFromHookEvent(event, options, state, trace);
   if (!scope) return null;
   return {
     scope,
@@ -321,6 +353,19 @@ function naturalPeerProgress(event, options, trace) {
       maxProgress: 3
     })
   };
+}
+
+/** Only ticket and review routes established by evidence reach this point.
+ * @param {any} state @param {any} natural @param {any} options
+ */
+function routedScopes(state, natural, options) {
+  const scopes = new Set(Array.isArray(state.routedScopes) ? state.routedScopes : []);
+  const scope = natural?.scope;
+  if (scope && ['ticket', 'merge-request'].includes(scope.kind)) {
+    scopes.delete(scopeRelation(scope.kind, scope.key));
+    scopes.add(scopeRelation(scope.kind, scope.key));
+  }
+  return [...scopes].slice(-options.stateLimit);
 }
 
 function freshNaturalPeerProgress(natural, state) {
@@ -561,7 +606,7 @@ export function createLifecycleConsumer(inputDefinition) {
       sessionKey = hash(`${definition.provider}-consumer:${event.session_id}`);
       statePath = join(options.runtimeRoot, 'state', `${sessionKey}.json`);
       natural = definition.advisoryEvents.has(eventName)
-        ? naturalPeerProgress(event, options, trace)
+        ? naturalPeerProgress(event, options, trace, loadState(statePath))
         : null;
       const transcriptPath = validateTranscriptPath(event.transcript_path, options);
 
@@ -679,6 +724,7 @@ export function createLifecycleConsumer(inputDefinition) {
         const nextState = {
           schemaVersion: 1,
           sessionKey,
+          routedScopes: routedScopes(state, freshNatural, options),
           watermark: Math.max(state.watermark, related.watermark),
           deliveredDeltaIds: [
             ...(state.deliveredDeltaIds ?? []),
@@ -724,7 +770,8 @@ export function createLifecycleConsumer(inputDefinition) {
       });
     } catch (error) {
       const classified = errorClass(error);
-      if (classified === 'TranscriptUnavailable' && sessionKey && statePath && natural) {
+      if (classified === 'TranscriptUnavailable' && sessionKey && statePath &&
+          (natural || trace.suggestedScopes.length > 0)) {
         try {
           return await withLock(`${statePath}.lock`, options, async () => {
             const state = loadState(statePath);
@@ -734,9 +781,10 @@ export function createLifecycleConsumer(inputDefinition) {
               ...state,
               schemaVersion: 1,
               sessionKey,
+              routedScopes: routedScopes(state, freshNatural, options),
               deliveredPeerProgressIds: [
                 ...(state.deliveredPeerProgressIds ?? []),
-                ...freshNatural.progress.map((item) => item.progressId)
+                ...(freshNatural?.progress ?? []).map((item) => item.progressId)
               ].slice(-options.stateLimit),
               lastEventName: eventName,
               updatedAt: options.now.toISOString()
@@ -748,10 +796,10 @@ export function createLifecycleConsumer(inputDefinition) {
               sessionKey,
               outcome: advisory ? 'context-partial' : 'no-change',
               errorClass: classified,
-              peerProgressCount: freshNatural.progress.length,
-              peerProgressDigests: freshNatural.progress.map((item) => item.progressId),
-              peerScopeKind: freshNatural.scope.kind,
-              peerScopeKeyHash: hash(freshNatural.scope.key),
+              peerProgressCount: freshNatural?.progress.length ?? 0,
+              peerProgressDigests: (freshNatural?.progress ?? []).map((item) => item.progressId),
+              peerScopeKind: freshNatural?.scope.kind ?? null,
+              peerScopeKeyHash: freshNatural ? hash(freshNatural.scope.key) : null,
               injectionDigest: injection.digest,
               injectionArtifact: injection.artifact,
               durationMs: Date.now() - startedAt

@@ -13,7 +13,8 @@
     "peerProgress",
     "policy",
     "budget",
-    "layers"
+    "layers",
+    "suggestedScopes"
   ],
   "properties": {
     "schemaVersion": {
@@ -268,8 +269,8 @@
     },
     "layers": {
       "type": "array",
-      "minItems": 9,
-      "maxItems": 9,
+      "minItems": 10,
+      "maxItems": 10,
       "prefixItems": [
         {
           "allOf": [
@@ -325,6 +326,21 @@
               "properties": {
                 "id": {
                   "const": "accepted-related"
+                }
+              },
+              "type": "object"
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/$defs/layer"
+            },
+            {
+              "properties": {
+                "id": {
+                  "const": "suggested-scopes"
                 }
               },
               "type": "object"
@@ -439,6 +455,32 @@
         },
         "claimsInjected": {
           "const": 0
+        }
+      }
+    },
+    "suggestedScopes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "keyHash",
+          "reason"
+        ],
+        "properties": {
+          "kind": {
+            "enum": [
+              "ticket",
+              "merge-request"
+            ]
+          },
+          "keyHash": {
+            "$ref": "#/$defs/hash"
+          },
+          "reason": {
+            "const": "no-local-evidence"
+          }
         }
       }
     }
@@ -695,6 +737,7 @@
             "accepted-ambient-project",
             "accepted-ambient-global",
             "accepted-related",
+            "suggested-scopes",
             "peer-progress",
             "notices",
             "artifact-evidence",
@@ -734,7 +777,8 @@
             "budget",
             "notices",
             "artifacts",
-            null
+            null,
+            "suggestedScopes"
           ]
         },
         "limit": {

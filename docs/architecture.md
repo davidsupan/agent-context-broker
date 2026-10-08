@@ -62,11 +62,12 @@ snapshot rows; read-limit candidates contribute their omitted claim count.
 | 2. `accepted-ambient-project` | Candidates from ambient project snapshots; `candidates`. |
 | 3. `accepted-ambient-global` | Candidates from ambient global snapshots; `candidates`. |
 | 4. `accepted-related` | Candidates from all other snapshot roles; `candidates`. |
-| 5. `peer-progress` | Peer decisions, including `already-delivered`; `peerProgress`. |
-| 6. `notices` | `off`, zero counts and null detail until the result has `teamNoticeLane`. Then map its state and `counts.included`, sum exclusions `read`, `quarantined`, `hiddenByAudience`, `omittedByBudget`, `unverified`, and point to `notices`. |
-| 7. `artifact-evidence` | `off`, zero counts and null detail; populated by an external wrapper. |
-| 8. `policy` | `denied` on `query-denied`, `used` on dropped scopes, otherwise `empty`; exclusions count policy rows by reason; `policy`. |
-| 9. `budget` | Always `used`; included is rendered UTF-8 bytes, excluded is zero, `limit` is `maxContextBytes`; `budget`. |
+| 5. `suggested-scopes` | Unconfirmed prompt keys; `suggestedScopes`. Included is zero; excluded and `no-local-evidence` count suggestions. `used` when non-empty, otherwise `empty`. |
+| 6. `peer-progress` | Peer decisions, including `already-delivered`; `peerProgress`. |
+| 7. `notices` | `off`, zero counts and null detail until the result has `teamNoticeLane`. Then map its state and `counts.included`, sum exclusions `read`, `quarantined`, `hiddenByAudience`, `omittedByBudget`, `unverified`, and point to `notices`. |
+| 8. `artifact-evidence` | `off`, zero counts and null detail; populated by an external wrapper. |
+| 9. `policy` | `denied` on `query-denied`, `used` on dropped scopes, otherwise `empty`; exclusions count policy rows by reason; `policy`. |
+| 10. `budget` | Always `used`; included is rendered UTF-8 bytes, excluded is zero, `limit` is `maxContextBytes`; `budget`. |
 
 The notice adapter only summarizes a supplied lane; this branch does not read
 notices or add that lane. Snapshot caps and unreadable snapshots remain in
@@ -111,6 +112,33 @@ Lifecycle `maxSnapshots` and `maxClaims` are zero. `maxContextBytes` and the bud
 layer's `limit` are zero to indicate no aggregate byte limit: existing caps of
 three peer items, compacted peer text and three accepted references still apply.
 No new truncation or selection is introduced by tracing.
+
+Lifecycle routing treats ticket and MR keys extracted from prompts as suggestions
+until local evidence establishes a route. A ticket qualifies when the session's
+git branch names it, its configured ticket package has valid `jira-context.json`
+metadata, this session previously routed to it with evidence, or a verified
+accepted claim or peer-progress record has that exact ticket scope and provenance
+from the current provider. Related scopes and another provider's records do not
+qualify. Accepted evidence uses the registry's verified snapshots and claims;
+peer evidence uses verified events and artifacts, including earlier expired or
+replaced work. These evidence reads are lazy and reused within each prompt.
+An MR qualifies through the existing configured review-ledger reader or an
+earlier evidenced route in the same session. No network lookup runs.
+
+Exactly one evidenced key wins even when the prompt contains other sample keys.
+Otherwise several keys retain the branch-only fallback. A lone unconfirmed key
+falls back to the branch ticket, then the configured default project, then no
+scope. A ticket-looking directory name alone is not evidence. Existing workstream
+routing applies when no ticket or MR keys are present. Explicit caller scopes
+(`--scope-kind`/`--scope-key`, `--issue-key`, `--review-key`) bypass this gate.
+
+The existing session state gains a bounded `routedScopes` list of relation hashes;
+old state without that list has no routing history. Only evidenced ticket/MR
+routes enter it, even when there is no peer advisory to deliver. Unconfirmed keys
+appear only as `suggestedScopes: [{ kind, keyHash, reason: 'no-local-evidence' }]`,
+where `keyHash` is SHA-256 of the lowercase key. Query traces have an empty list.
+Suggestions add no advisory text. They are persisted even when the transcript is
+unavailable and no fallback scope exists; the injection payload is then empty.
 
 To list a session's injections, scan `injections/*.json`, select the exact
 `threadRef`, and sort by `generatedAt` (then filename for equal timestamps).

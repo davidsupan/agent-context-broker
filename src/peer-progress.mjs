@@ -20,6 +20,7 @@ import {
   sha256,
   stableJson,
   stableValue,
+  verifyEventStore,
   verifyEventTail
 } from './event-store.mjs';
 import { assertPublishable, policyEntry, scopeReadable } from './provider-policy.mjs';
@@ -420,6 +421,25 @@ function currentProgressEvents(eventRuntimeRoot, now = new Date()) {
   const current = new Map();
   for (const event of events) current.set(event.payload.actorKey, event);
   return [...current.values()];
+}
+
+/** Earlier work is evidence even after expiry or replacement.
+ * @param {string} runtimeRoot @param {string} eventRuntimeRoot @param {string} provider
+ * @returns {Set<string>}
+ */
+export function peerTicketKeysForProvider(runtimeRoot, eventRuntimeRoot, provider) {
+  const keys = new Set();
+  for (const event of verifyEventStore({ runtimeRoot: eventRuntimeRoot }).events) {
+    if (event.eventType !== 'peer-progress.published' || event.provider !== provider ||
+        event.scope?.kind !== 'ticket') continue;
+    try {
+      const artifact = verifiedArtifact(runtimeRoot, event);
+      if (artifact.scope.kind === 'ticket' && artifact.provider === provider) keys.add(artifact.scope.key);
+    } catch {
+      // Missing or corrupt artifacts are not routing evidence.
+    }
+  }
+  return keys;
 }
 
 export function planPeerProgressPublication(inputOptions = {}) {
