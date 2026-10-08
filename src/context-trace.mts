@@ -25,7 +25,7 @@ export type Layer = {
   limit?: number;
 };
 export type TeamNoticeLane = {
-  state: Layer['state'];
+  state: Layer['state'] | 'ready' | 'disabled-by-policy' | 'untrusted-or-unavailable';
   counts: { included: number; read?: number; quarantined?: number; hiddenByAudience?: number;
     omittedByBudget?: number; unverified?: number };
 };
@@ -87,7 +87,9 @@ export function traceLayers(trace: ContextTrace, result?: { teamNoticeLane?: Tea
   const notices = summarize('notices', null, [], true);
   if (result?.teamNoticeLane) {
     const lane = result.teamNoticeLane;
-    notices.state = lane.state;
+    notices.state = lane.state === 'ready' ? (lane.counts.included ? 'used' : 'empty')
+      : lane.state === 'disabled-by-policy' ? 'denied'
+      : lane.state === 'untrusted-or-unavailable' ? 'error' : lane.state;
     notices.detail = 'notices';
     notices.included = lane.counts.included;
     for (const reason of ['read', 'quarantined', 'hiddenByAudience', 'omittedByBudget', 'unverified'] as const) {

@@ -369,14 +369,20 @@ test('lifecycle layers describe peer delivery, deduplication and policy without 
 test('notice layer remains off until a lane is present, then maps its state and counts', () => {
   const trace = createContextTrace();
   assert.deepEqual(trace.layers[6], { id: 'notices', state: 'off', included: 0, excluded: 0, reasons: {}, detail: null });
-  for (const state of ['used', 'empty', 'off', 'denied', 'error']) {
-    trace.layers = traceLayers(trace, { teamNoticeLane: { state, counts: {
+  for (const [laneState, state] of [
+    ['used', 'used'], ['empty', 'empty'], ['off', 'off'], ['denied', 'denied'], ['error', 'error'],
+    ['ready', 'used'], ['disabled-by-policy', 'denied'], ['untrusted-or-unavailable', 'error']
+  ]) {
+    trace.layers = traceLayers(trace, { teamNoticeLane: { state: laneState, counts: {
       included: 2, read: 1, quarantined: 2, hiddenByAudience: 3, omittedByBudget: 4, unverified: 5
     } } });
     assert.deepEqual(trace.layers[6], { id: 'notices', state, included: 2, excluded: 15,
       reasons: { read: 1, quarantined: 2, hiddenByAudience: 3, omittedByBudget: 4, unverified: 5 }, detail: 'notices' });
     valid(trace);
   }
+  trace.layers = traceLayers(trace, { teamNoticeLane: { state: 'ready', counts: { included: 0 } } });
+  assert.equal(trace.layers[6].state, 'empty');
+  valid(trace);
 });
 
 function routingHarness(h, provider = providers[0]) {

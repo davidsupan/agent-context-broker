@@ -139,6 +139,47 @@ second wrapper that skips the check can still declare descriptors. Treat the
 switch as a deployment gate to be lifted once every installed reader is upgraded
 and rollback is no longer wanted, and audit any other wrapper for the same check.
 
+## Team-shared notices
+
+Team-shared notices have an additional untrusted-content boundary: offline
+branch ancestry, strict record revalidation, quarantine without text, local
+audience policy, a data envelope and per-call byte limits.
+
+The pattern list is a heuristic, not the control. It can miss malicious prose in
+any language and can flag harmless text. The controls are review on the protected
+branch with recorded approval provenance, the secret-derived nonce envelope, unread-only
+injection, the lane byte cap, quarantine, and never placing notice text in a system
+prompt. Only approved, unread notices at primary or visible audience level enter
+the injected lane. A failed lane returns no notice text and a `team-shared-error`
+warning code; accepted claims keep working. Offline CI receipts must match the
+record ID and raw-byte digest, with a host-verified manifest binding the artifact
+to the configured repository, project, reachable checkout commit and protected
+pipeline. Missing receipts remain unverified; malformed receipts quarantine.
+The legacy metadata approval map grants no authority. The host is responsible
+for authenticated artifact sync and cache integrity. The trust anchor is the local
+receipt producer and authenticated host sync, together with protection of the
+runtime home. Anything that can write that home can forge `trust.json`; this is
+the same local trust boundary as the broker store.
+
+Envelope-marker false positives quarantine the notice without exposing its text.
+The reported reason id identifies the marker the author must change before the
+notice can be reviewed and included again.
+
+Envelope nonces use HMAC-SHA256 with a private per-installation secret and sorted
+included notice/snapshot digests. Identical inputs preserve payload digests;
+record content alone cannot predict the nonce. First use atomically publishes the
+secret. On POSIX the file uses mode 0600. Windows skips the POSIX mode check and
+relies on the user profile ACL to protect the runtime home. For new Windows
+secrets, the fixed PowerShell host helper also sets an explicit owner-only ACL
+with inheritance disabled on the empty temporary file before secret bytes are
+written and the file is published. Existing Windows secrets retain their ACLs.
+Unsafe/unavailable secret storage or ACL setup uses random nonces and reports
+`team-shared-nonce-ephemeral`, losing stable digest behavior for that query.
+
+See
+[Team-shared notices](provider-policy.md#team-shared-notices) for configuration,
+rule ids, local trust assumptions and host responsibilities.
+
 ## Responsible disclosure
 
 Do not open a public issue for a suspected vulnerability that contains secrets,
