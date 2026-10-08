@@ -18,6 +18,9 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { normalizeAgentDescriptor } from './agent-identity.mts';
 import { loadContextProfiles, routeContextProfile } from './context-router.mts';
 import { readPeerProgress } from './peer-progress.mjs';
+import { listContextNotices, noticeCounts } from './context-notices.mjs';
+import { sealNoticeLane } from './notice-nonce.mjs';
+import { sharedRuntimeHome } from './shared-context.mjs';
 import { policyEntry, scopeReadable } from './provider-policy.mjs';
 import { loadState } from './reconciliation.mjs';
 import { relationsForScope, reviewLedgerContext } from './work-ledgers.mts';
@@ -443,7 +446,7 @@ function boundedContext(lines, maxBytes) {
   return accepted.join('\n');
 }
 
-function renderContext(result, maxBytes) {
+function renderContext(result, maxBytes, noticeHome = /** @type {string|null} */ (null)) {
   if (result.strictIsolation) {
     return 'Agent Context Broker strict isolation is active. No cross-task or peer-provider context was read or injected.';
   }
@@ -463,6 +466,36 @@ function renderContext(result, maxBytes) {
     lines.push(`- ${claim.claimKey}${label}: ${value} [${claim.providers.join('+')}] (${claim.canonicalRefs.join(', ')})`);
   }
   if (result.claims.length === 0) lines.push('No matching accepted claims were found.');
+  if (result.teamNotices?.some((/** @type {import('./context-notices.mjs').NoticeView} */ notice) => notice.text)) {
+    const lane = result.teamNoticeLane;
+    let remaining = maxBytes - lines.reduce((sum, line) => sum + Buffer.byteLength(`${line}\n`), 0);
+    const envelopes = [];
+    for (const notice of result.teamNotices) {
+      if (!notice.text) continue;
+      const block = `${envelopes.length ? '' : `${lane.header}\n`}${notice.text}`;
+      const bytes = Buffer.byteLength(`${block}\n`);
+      if (bytes > remaining) {
+        delete notice.text;
+        notice.textOmitted = true;
+        lane.counts.included--;
+        lane.counts.omittedByBudget++;
+      } else {
+        remaining -= bytes;
+        envelopes.push(notice.text);
+      }
+    }
+    if (!envelopes.length) lane.header = '';
+    lane.textBytes = envelopes.length ? Buffer.byteLength([lane.header, ...envelopes].join('\n')) : 0;
+    sealNoticeLane(lane, result.teamNotices, noticeHome,
+      result.claims.map((/** @type {{snapshot: {snapshotHash: string}}} */ claim) => claim.snapshot.snapshotHash), result.warnings);
+    let first = true;
+    for (const notice of result.teamNotices) {
+      if (!notice.text) continue;
+      // The first header and envelope form one indivisible boundedContext entry.
+      lines.push(`${first ? `${lane.header}\n` : ''}${notice.text}`);
+      first = false;
+    }
+  }
   if (result.peerProgress.length > 0) {
     lines.push('Live peer progress (unverified; verify canonical sources before acting):');
     for (const progress of result.peerProgress) {
@@ -647,10 +680,26 @@ async function buildContextQuery(inputOptions = {}) {
     base.peerProgress = progress.progress;
     base.warnings.push(...progress.warnings);
   }
+  // This independent source must run before the missing accepted-registry return.
+  try {
+    const notices = listContextNotices({ ...options, activeOnly: true, injectionOnly: true, deferNonce: true,
+      maxTextBytes: Math.floor(route.profile.maxContextBytes / 4) });
+    if (notices.state !== 'not-configured') {
+      /** @type {any} */ (base).teamNotices = notices.notices;
+      /** @type {any} */ (base).teamNoticeLane = { state: notices.state, counts: notices.counts,
+        header: notices.header, textBytes: notices.textBytes, textBudgetBytes: notices.textBudgetBytes };
+      if (notices.state !== 'ready') /** @type {string[]} */ (base.warnings).push(`team-shared-${notices.state}`);
+      if (notices.notices.some((n) => n.provenance?.stale)) /** @type {string[]} */ (base.warnings).push('team-shared-stale');
+    }
+  } catch {
+    /** @type {any} */ (base).teamNotices = [];
+    /** @type {any} */ (base).teamNoticeLane = { state: 'error', counts: noticeCounts(), header: '', textBytes: 0, textBudgetBytes: 0 };
+    /** @type {string[]} */ (base.warnings).push('team-shared-error');
+  }
   const registry = readJson(join(root, 'accepted-snapshots.json'));
   if (!registry) {
     base.warnings.push('accepted-registry-missing');
-    base.context = renderContext(base, route.profile.maxContextBytes);
+    base.context = renderContext(base, route.profile.maxContextBytes, sharedRuntimeHome(/** @type {import('./shared-context.mjs').SharedOptions} */ (options)));
     base.injection = { payload: base.context, digest: hash(base.context), persisted: false, artifact: null };
     return base;
   }
@@ -710,7 +759,7 @@ async function buildContextQuery(inputOptions = {}) {
   if (base.claims.some((claim) => claim.valueOmitted)) {
     base.warnings.push('accepted-claim-value-omitted');
   }
-  base.context = renderContext(base, route.profile.maxContextBytes);
+  base.context = renderContext(base, route.profile.maxContextBytes, sharedRuntimeHome(/** @type {import('./shared-context.mjs').SharedOptions} */ (options)));
   base.injection = { payload: base.context, digest: hash(base.context), persisted: false, artifact: null };
   return base;
 }

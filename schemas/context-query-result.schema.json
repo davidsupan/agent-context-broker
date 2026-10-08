@@ -19,6 +19,22 @@
     "strictIsolation": { "type": "boolean" },
     "claims": { "type": "array", "items": { "type": "object" } },
     "peerProgress": { "type": "array", "items": { "type": "object" } },
+    "teamNotices": {
+      "type": "array",
+      "description": "Only approved, unread, primary/visible notices selected for injection. Budget omissions retain metadata with textOmitted=true. Hidden, read, advice/notice, unverified and quarantined records have counts only. Absent when the lane is not configured or the query is isolated; empty on lane errors.",
+      "items": { "$ref": "#/$defs/teamNotice" }
+    },
+    "teamNoticeLane": {
+      "type": "object", "additionalProperties": false,
+      "required": ["state", "counts", "header", "textBytes", "textBudgetBytes"],
+      "properties": {
+        "state": { "enum": ["ready", "disabled-by-policy", "untrusted-or-unavailable", "error"] },
+        "counts": { "$ref": "#/$defs/noticeCounts" },
+        "header": { "type": "string", "description": "One trusted header stating the secret-derived envelope id; empty when no text fits. Ephemeral random fallback is reported in warnings." },
+        "textBytes": { "type": "integer", "minimum": 0, "description": "UTF-8 bytes of header, complete envelopes and their newline separators actually included." },
+        "textBudgetBytes": { "type": "integer", "minimum": 0, "description": "At most teamShared.maxContextBytes (default 2048), checkout maxTextBytes and one quarter of the profile budget. Zero on error." }
+      }
+    },
     "warnings": { "type": "array", "items": { "type": "string" } },
     "context": { "type": "string" },
     "injection": {
@@ -46,6 +62,46 @@
         "ticketLedgerPersisted": { "type": "boolean" },
         "reviewLedgerPersisted": { "type": "boolean" },
         "threadLedgerPersisted": { "type": "boolean" }
+      }
+    }
+  },
+  "$defs": {
+    "noticeCounts": {
+      "type": "object", "additionalProperties": false,
+      "description": "Per-call counts, also returned as counts by list/show. Errors reset all counts to zero. Hidden notices are counted before status filtering. Quarantined counts cover records without trusted audience/status metadata. Other counts cover active nonhidden notices; unverified and advice/notice counts may overlap. Read counts only acknowledgements excluded by unread/injection filtering. Included counts envelopes actually emitted; budget omissions only count otherwise eligible text.",
+      "required": ["included", "read", "quarantined", "quarantineReasons", "hiddenByAudience", "omittedByBudget", "unverified", "advice", "notice"],
+      "properties": {
+        "included": { "type": "integer", "minimum": 0 },
+        "read": { "type": "integer", "minimum": 0 },
+        "quarantined": { "type": "integer", "minimum": 0 },
+        "quarantineReasons": { "type": "object", "description": "Stable reason id to affected record count; a record may have multiple reasons.", "additionalProperties": { "type": "integer", "minimum": 1 } },
+        "hiddenByAudience": { "type": "integer", "minimum": 0 },
+        "omittedByBudget": { "type": "integer", "minimum": 0 },
+        "unverified": { "type": "integer", "minimum": 0 },
+        "advice": { "type": "integer", "minimum": 0 },
+        "notice": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "teamNotice": {
+      "type": "object", "additionalProperties": false,
+      "required": ["recordId", "contentDigest", "status"],
+      "description": "Stable notice view shared with list/show; quarantined list/show entries expose only recordId, contentDigest, status and quarantineReasons, never text.",
+      "properties": {
+        "recordId": { "type": ["string", "null"], "pattern": "^NTC-[0-9]{8}-[a-f0-9]{6}$" },
+        "contentDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "status": { "enum": ["unread", "read", "superseded", "expired", "quarantined"] },
+        "quarantineReasons": { "type": "array", "items": { "type": "string" } },
+        "kind": { "enum": ["announcement", "release"] },
+        "subject": { "type": "object" },
+        "author": { "type": "string" },
+        "approvedBy": { "type": "array", "items": { "type": "string" } },
+        "audienceLevel": { "enum": ["primary", "visible", "advice", "notice", "hidden"] },
+        "origin": { "const": "team-shared" },
+        "verification": { "enum": ["approved-by-review", "unverified"] },
+        "sensitivity": { "const": "shared" },
+        "provenance": { "type": "object" },
+        "text": { "type": "string", "description": "Complete data envelope, bounded by matching secret-derived ids. Never place in a system prompt." },
+        "textOmitted": { "const": true, "description": "Otherwise eligible text did not fit the lane or final profile byte budget." }
       }
     }
   }
