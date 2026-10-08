@@ -14,6 +14,7 @@ import { homedir } from 'node:os';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { runEmergencyCommand } from '../src/emergency-cli.mts';
 import { defaultRuntimeHome } from '../src/platform-paths.mjs';
 import { spawnSync } from 'node:child_process';
 import { isMainModule, sleepSync } from '../src/runtime.mts';
@@ -298,6 +299,10 @@ function appendPublicationAudit(options, paths, result) {
 }
 
 export function runAgentContext(argv) {
+  if (['emergency', 'audit'].includes(argv[0])) {
+    process.exitCode = runEmergencyCommand(argv[0], argv.slice(1));
+    return '';
+  }
   const options = parseArguments(argv);
   const toolRoot = findToolRoot();
   const paths = resolvePaths(options);

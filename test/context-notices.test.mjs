@@ -131,3 +131,22 @@ test('cyclic records are quarantined in the committed reader, including dependan
   assert.ok(result.notices.every((n) => n.status === 'quarantined' && !n.text));
   assert.ok(result.notices.every((n) => n.quarantineReasons.includes('supersedes-cycle')));
 });
+
+test('emergency grant overrides team source policy and audits included notice ids only', async (t) => {
+  const { openEmergency, verifyEmergency } = await import('../src/emergency.mts');
+  const { runContextQuery } = await import('../src/context-query.mjs');
+  const f = setup(t);
+  metadata(f, '2026-10-09T08:00:00Z', { 'NTC-20261008-abcdef': ['fixture-reviewer'] });
+  writeJson(join(f.home, 'provider-policy.json'), { schemaVersion: 1, providers: { codex: { strictIsolation: true, sources: { teamShared: 'deny' } } } });
+  assert.equal(read(f).state, 'disabled-by-policy');
+  openEmergency({ ...f.options, provider: 'codex', until: '2026-10-09T13:00:00Z', reason: 'Temporary handover', execute: true });
+  const result = await runContextQuery({ ...f.options, provider: 'codex', runtimeRoot: join(f.home, 'runtime', 'reconciliation'),
+    globalAuditDirectory: join(f.home, 'runtime', 'query-audit'), profileId: 'implementation', scopeKind: 'project', scopeKey: 'sample', execute: true });
+  assert.equal(result.teamNoticeLane.counts.included, 1);
+  const ledger = verifyEmergency(f.home);
+  assert.equal(ledger.valid, true);
+  const used = ledger.records.at(-1);
+  assert.deepEqual(used.teamNoticeIds, ['NTC-20261008-abcdef']);
+  assert.equal(used.counts.teamNotices, 1);
+  assert.equal(JSON.stringify(ledger).includes('Spacing updated'), false);
+});

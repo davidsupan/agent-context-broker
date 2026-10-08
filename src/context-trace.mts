@@ -6,6 +6,7 @@ export type ClaimReason = 'stale' | 'expired' | 'claim-type' | 'provider' |
   'private-other-provider' | 'relation' | 'term-miss' | 'claim-cap' | 'tombstoned';
 export type ClaimDecision = {
   claimId: string; claimKey: string | null; claimType: string | null;
+  truncated?: true; omittedBytes?: number;
   subject: string | null; predicate: string | null; snapshotId: string;
   score: number | null; decision: 'included' | 'excluded'; reason?: ClaimReason;
 };
@@ -23,6 +24,7 @@ export type Layer = {
   included: number; excluded: number; reasons: Record<string, number>;
   detail: 'candidates' | 'suggestedScopes' | 'peerProgress' | 'policy' | 'budget' | 'notices' | 'artifacts' | null;
   limit?: number;
+  claims?: { claimId: string; truncated: true; omittedBytes: number }[];
 };
 export type TeamNoticeLane = {
   state: Layer['state'] | 'ready' | 'disabled-by-policy' | 'untrusted-or-unavailable';
@@ -81,6 +83,11 @@ export function traceLayers(trace: ContextTrace, result?: { teamNoticeLane?: Tea
       const actual = roleFor.get(item.snapshotId) ?? 'related';
       return role === 'related' ? !roles.slice(0, 3).some(known => known === actual) : actual === role;
     }), Boolean(trace.lifecycle)));
+  for (const layer of layers) {
+    const cut = trace.candidates.filter((item): item is ClaimDecision => 'claimId' in item && item.truncated === true &&
+      `accepted-${roleFor.get(item.snapshotId) ?? 'related'}` === layer.id);
+    if (cut.length) layer.claims = cut.map(item => ({ claimId: item.claimId, truncated: true, omittedBytes: item.omittedBytes! }));
+  }
   layers.push(summarize('suggested-scopes', 'suggestedScopes',
     trace.suggestedScopes.map(item => ({ ...item, decision: 'excluded' }))));
   layers.push(summarize('peer-progress', 'peerProgress', trace.peerProgress));

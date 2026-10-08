@@ -1,3 +1,4 @@
+import { prepareEmergency, emergencyUse } from './emergency.mts';
 import { randomUUID } from 'node:crypto';
 import {
   closeSync,
@@ -442,17 +443,20 @@ export function peerTicketKeysForProvider(runtimeRoot, eventRuntimeRoot, provide
   return keys;
 }
 
+/** @param {any} inputOptions */
 export function planPeerProgressPublication(inputOptions = {}) {
+  inputOptions = prepareEmergency({ ...inputOptions, execute: false });
   if (!inputOptions.runtimeRoot || !inputOptions.eventRuntimeRoot) {
     throw new Error('Peer progress publication requires runtimeRoot and eventRuntimeRoot.');
   }
-  if (inputOptions.strictIsolation === true) {
+  if (inputOptions.strictIsolation === true || (inputOptions.env ?? process.env).AGENT_CONTEXT_BROKER_STRICT_ISOLATION === '1' || inputOptions.profileId === 'strict-isolation') {
     throw new Error('Peer progress publication is unavailable in strict isolation.');
   }
   const { artifact, source } = artifactFor({ ...DEFAULTS, ...inputOptions });
   return {
     schemaVersion: 1,
     mode: 'peer-progress-publication',
+    ...(inputOptions.emergency?.warnings.length ? { warnings: inputOptions.emergency.warnings } : {}),
     writesEnabled: false,
     progressId: artifact.progressId,
     progressRef: `acb://progress/${artifact.progressId}`,
@@ -470,18 +474,21 @@ export function planPeerProgressPublication(inputOptions = {}) {
   };
 }
 
+/** @param {any} inputOptions */
 export async function publishPeerProgress(inputOptions = {}) {
-  const options = { ...DEFAULTS, ...inputOptions };
+  const options = prepareEmergency({ ...DEFAULTS, ...inputOptions });
   if (options.execute !== true || !options.runtimeRoot || !options.eventRuntimeRoot) {
     throw new Error('Peer progress publication requires execute: true, runtimeRoot, and eventRuntimeRoot.');
   }
-  if (options.strictIsolation === true) {
+  if (options.strictIsolation === true || (options.env ?? process.env).AGENT_CONTEXT_BROKER_STRICT_ISOLATION === '1' || options.profileId === 'strict-isolation') {
     throw new Error('Peer progress publication is unavailable in strict isolation.');
   }
   return withLock(join(resolve(options.runtimeRoot), 'peer-progress', 'publish.lock'), options, async () => {
     const { artifact, source } = artifactFor(options);
     const current = currentProgressEvents(options.eventRuntimeRoot)
       .find((event) => event.payload.actorKey === artifact.actorKey) ?? null;
+    emergencyUse(options, options.emergency, 'progress', { bytes: Buffer.byteLength(`${JSON.stringify(artifact, null, 2)}\n`), peerProgressIds: [artifact.progressId],
+      scopes: artifact.relationKeys.map(relationKey => ({ relationKey, kind: relationKey.split(':')[0] })) });
     const path = recordPath(options.runtimeRoot, artifact.progressId);
     const content = `${JSON.stringify(artifact, null, 2)}\n`;
     if (existsSync(path)) {
@@ -498,6 +505,7 @@ export async function publishPeerProgress(inputOptions = {}) {
     return {
       ...planPeerProgressPublication(options),
       writesEnabled: true,
+      warnings: options.emergency.warnings,
       eventId: event.eventId,
       idempotentReplay: event.idempotentReplay,
       replacesRef: event.replacesRef

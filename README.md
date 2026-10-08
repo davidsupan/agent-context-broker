@@ -105,6 +105,20 @@ Each returned claim carries its `sensitivity`, and the rendered context marks pr
 
 An optional provider policy gives each installed provider its own read and publish rules: allowed and denied scopes, a maximum sensitivity, the allowed evidence classes, and provider-specific settings. For example, one provider can publish only into a research inbox and read nothing else. Without a policy file the broker behaves exactly as before, and an invalid file fails closed. Install it with `--provider-policy <file>`; `doctor` reports its hash and rule counts. It is a guardrail for cooperating agents, not a sandbox. See [`docs/provider-policy.md`](docs/provider-policy.md).
 
+### Hand over to a restricted provider in an emergency
+
+When the primary provider runs out of its usage window, a host or the operator can open an emergency grant: the restricted provider then reads and publishes like a provider without a policy entry until an absolute expiry, at most seven days and one hour ahead. Explicitly requested strict isolation still wins.
+
+```sh
+node scripts/agent-context.mjs emergency open --provider codex --until 2026-10-09T12:00:00Z \
+  --trigger primary-rate-limit --window five_hour --reason "Primary usage window used up" --execute
+node scripts/agent-context.mjs emergency status
+node scripts/agent-context.mjs emergency report --text
+node scripts/agent-context.mjs emergency close --provider codex --reason primary-restored --execute
+```
+
+Every grant, every query, publication and progress record made under it, and its close or expiry are appended to a hash-chained ledger with a separate head checkpoint, so an edited, reordered or removed record is evident. The ledger holds ids, keys and counts, never claim values. Writes are recorded before they happen and are listed in the report with their current state, so each can be reviewed and withdrawn with `claims-withdraw`. The primary provider's next session start shows a one-line summary once. `audit prune` removes old injection audit files on request (30 days by default, planned unless `--execute`). See [`docs/provider-policy.md`](docs/provider-policy.md#emergency-grants).
+
 ### Inventory provider metadata
 
 The lower-level command inventories a bounded provider source. Keep source files private and use the matching provider name:

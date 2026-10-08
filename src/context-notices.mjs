@@ -1,3 +1,4 @@
+import { prepareEmergency } from './emergency.mts';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
@@ -131,10 +132,12 @@ export function listContextNotices(options = {}) {
   if (options.audienceRole && !ROLE_ID.test(options.audienceRole)) throw new Error('Invalid reader role.');
   if (options.recordId && !NOTICE_ID.test(options.recordId)) throw new Error('Invalid notice identifier.');
   if (options.subjectType && !['design-kit', 'prototype', 'pack'].includes(options.subjectType)) throw new Error('Invalid notice subject type.');
+  const prepared = prepareEmergency({ ...options, provider: options.provider ?? 'codex' });
+  options = { ...options, providerPolicy: prepared.providerPolicy };
   const read = source(options);
   const result = { schemaVersion: 1, mode: 'context-notices', state: read.state,
     notices: /** @type {NoticeView[]} */ ([]), counts: noticeCounts(), header: '', textBytes: 0, textBudgetBytes: read.config.maxTextBytes,
-    warnings: /** @type {string[]} */ ([]) };
+    warnings: /** @type {string[]} */ ([...prepared.emergency.warnings]) };
   if (read.state !== 'ready' || !('provenance' in read) || !read.provenance) return result;
   const provenance = read.provenance;
   const requestedBudget = options.maxTextBytes ?? read.config.maxTextBytes;

@@ -1,3 +1,4 @@
+import { evaluateEmergency, emergencyHome } from './emergency.mts';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 
@@ -11,6 +12,7 @@ import { defaultRuntimeHome } from './platform-paths.mjs';
 // declaration, not an authentication, so the policy is a guardrail and not a sandbox.
 
 export const POLICY_FILE = 'provider-policy.json';
+const policyContexts = new WeakMap();
 const MAX_POLICY_BYTES = 64 * 1024;
 const PROVIDERS = new Set(['codex', 'claude-code']);
 const SCOPE_KINDS = ['global', 'project', 'workstream', 'ticket', 'merge-request'];
@@ -121,21 +123,37 @@ export function providerPolicyPath(options = {}) {
 /** Returns null when no policy file applies or exists; throws on a present but invalid file. */
 export function loadProviderPolicy(options = {}) {
   const path = providerPolicyPath(options);
-  if (path === null || !existsSync(path)) return null;
+  if (path === null || !existsSync(path)) {
+    const home = emergencyHome(options);
+    if (!home || !existsSync(join(home, 'emergency', 'grants.jsonl'))) return null;
+    const policy = Object.freeze({ schemaVersion: 1, sha256: null, providers: {}, path });
+    policyContexts.set(policy, options);
+    return policy;
+  }
   const stat = statSync(path);
   if (!stat.isFile() || stat.size > MAX_POLICY_BYTES) throw invalid();
-  return Object.freeze({ ...parseProviderPolicy(readFileSync(path, 'utf8')), path });
+  const policy = Object.freeze({ ...parseProviderPolicy(readFileSync(path, 'utf8')), path });
+  policyContexts.set(policy, options);
+  return policy;
 }
 
+/** @param {any} policy @param {string} provider */
 export function policyEntry(policy, provider) {
+  if (emergencyFor(policy, provider)?.grant?.provider === provider) return null;
   return policy?.providers?.[provider] ?? null;
+}
+
+/** @param {any} policy @param {string} provider */
+function emergencyFor(policy, provider) {
+  return policy?.emergency ?? (policyContexts.has(policy) ? evaluateEmergency({ ...policyContexts.get(policy), provider }) : null);
 }
 
 /** The shared source is opt-in even without a provider policy. Isolation always wins.
  * @param {ReturnType<typeof loadProviderPolicy>} policy @param {string} provider */
 export function teamSharedReadable(policy, provider) {
   const rule = policyEntry(policy, provider);
-  return !rule?.strictIsolation && rule?.sources?.teamShared === 'allow';
+  return emergencyFor(policy, provider)?.grant?.provider === provider ||
+    (!rule?.strictIsolation && rule?.sources?.teamShared === 'allow');
 }
 
 function globMatch(pattern, value) {
@@ -173,17 +191,18 @@ export function readRestricted(policyOrEntry, provider) {
 /** Throws when the provider may not publish the given claims or progress to the scope. */
 export function assertPublishable(policy, provider, scope, items = []) {
   const rule = policyEntry(policy, provider);
+  const failure = (/** @type {string} */ message) => Object.assign(new Error(message), { warnings: emergencyFor(policy, provider)?.warnings ?? [] });
   if (!rule) return;
-  if (rule.strictIsolation) throw new Error('Provider policy isolates this provider from publication.');
-  if (!allowed(rule.publish, scope)) throw new Error('Provider policy denies publication to this scope.');
+  if (rule.strictIsolation) throw failure('Provider policy isolates this provider from publication.');
+  if (!allowed(rule.publish, scope)) throw failure('Provider policy denies publication to this scope.');
   const max = rule.publish?.maxSensitivity;
   for (const item of items) {
     if (max && SENSITIVITY_RANK[item.sensitivity ?? 'shared'] > SENSITIVITY_RANK[max]) {
-      throw new Error('Provider policy denies publication at this sensitivity.');
+      throw failure('Provider policy denies publication at this sensitivity.');
     }
     if (rule.publish?.evidenceClasses && item.evidenceClass !== undefined &&
         !rule.publish.evidenceClasses.includes(item.evidenceClass)) {
-      throw new Error('Provider policy denies publication of this evidence class.');
+      throw failure('Provider policy denies publication of this evidence class.');
     }
   }
 }
